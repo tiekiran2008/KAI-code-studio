@@ -1,0 +1,46 @@
+# =============================================================================
+# KAI Code Studio — Docker Compose Dev Override
+# =============================================================================
+#
+# Overrides the production frontend image with the Vite dev server for a
+# fast hot-module-replacement (HMR) local development experience.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# This override:
+#   - Replaces the nginx/production build with the Vite dev server
+#   - Re-maps port 3000 → 3000 (Vite) instead of 3000 → 80 (nginx)
+#   - Mounts the source directory for live HMR without rebuilding
+#   - Reads VITE_* from frontend/.env at runtime (Vite dev server supports this)
+# =============================================================================
+
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./frontend/.env
+    environment:
+      # Vite dev server proxies /api/* to the backend container internally
+      VITE_API_BASE_URL: ""
+      VITE_API_PREFIX: /api/v1
+    volumes:
+      # Mount source for HMR — do NOT mount node_modules (use image copy)
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tsconfig.app.json:/app/tsconfig.app.json
+    depends_on:
+      backend:
+        condition: service_started
+    # Remove healthcheck since Vite dev server doesn't have /nginx-health
+    healthcheck:
+      disable: true

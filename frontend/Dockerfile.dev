@@ -1,0 +1,24 @@
+# =============================================================================
+# KAI Code Studio — Frontend Development Dockerfile
+# =============================================================================
+# Single-stage dev image using the Vite dev server with HMR.
+# Used only for local development via docker-compose.dev.yml.
+# DO NOT use this in CI or production — use the multi-stage Dockerfile instead.
+# =============================================================================
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies (cached layer — only re-runs when package files change)
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+# Copy source (will be overridden by volume mount in docker-compose.dev.yml)
+COPY . .
+
+# Expose Vite dev server port
+EXPOSE 3000
+
+# Start Vite dev server bound to all interfaces so Docker port mapping works
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
