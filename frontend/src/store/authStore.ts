@@ -55,9 +55,9 @@ export const useAuthStore = create<AuthState>()(
           console.log('[OAuth] Supabase configured:', isSupabaseConfigured);
 
           if (supabase && isSupabaseConfigured) {
-            // Always redirect to 127.0.0.1 so the URL matches the Supabase
-            // allow-list regardless of whether the user opened localhost or 127.0.0.1.
-            const redirectTo = `${window.location.protocol}//127.0.0.1:${window.location.port || '3000'}/auth/callback`;
+            // Use the current origin so the redirect URL works in both local
+            // development (http://localhost:5173) and production (https://your-app.vercel.app).
+            const redirectTo = `${window.location.origin}/auth/callback`;
             console.log('[OAuth] Calling signInWithOAuth, redirectTo:', redirectTo);
 
             const { error } = await supabase.auth.signInWithOAuth({
