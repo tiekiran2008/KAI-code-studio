@@ -297,15 +297,64 @@ def _build_langgraph_supervisor(app_state: Any) -> Any:
 # Lifespan context manager
 # ---------------------------------------------------------------------------
 
+async def _async_warmup(app: FastAPI) -> None:
+    """Non-blocking background warm-up task to prevent port scan timeouts on Render/cloud hosting."""
+    import asyncio
+
+    # ---- 1. PostgreSQL ----
+    try:
+        await asyncio.to_thread(_init_postgres)
+    except Exception as exc:
+        logger.error("postgres_init_failed", error=str(exc))
+
+    # ---- 2. Redis ----
+    try:
+        await asyncio.to_thread(_init_redis)
+    except Exception as exc:
+        logger.error("redis_init_failed", error=str(exc))
+
+    # ---- 3. Qdrant ----
+    try:
+        await asyncio.to_thread(_init_qdrant)
+    except Exception as exc:
+        logger.error("qdrant_init_failed", error=str(exc))
+
+    # ---- 4. Memory Manager ----
+    try:
+        app.state.memory_manager = await asyncio.to_thread(_build_memory_manager)
+    except Exception as exc:
+        app.state.memory_manager = None
+        logger.warning("memory_manager_init_failed", error=str(exc))
+
+    # ---- 5. Tool Registry & LangGraph Supervisor ----
+    try:
+        app.state.agent_graph = await asyncio.to_thread(_build_langgraph_supervisor, app.state)
+    except Exception as exc:
+        app.state.agent_graph = None
+        logger.warning("langgraph_supervisor_init_failed", error=str(exc))
+        # Fallback tool registry if supervisor initialization failed
+        try:
+            if not getattr(app.state, "tool_registry", None):
+                from src.application.services.memory_service import MemoryService
+                mem_svc = MemoryService(app.state.memory_manager) if app.state.memory_manager else None
+                app.state.tool_registry = _build_tool_registry(memory_service=mem_svc)
+        except Exception:
+            app.state.tool_registry = None
+
+    logger.info("startup_complete", message="Background warm-up complete; application is ready")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Manages application startup and graceful shutdown.
 
-    Every infrastructure component is wrapped in its own try/except so that a
-    single failing dependency does not prevent the server from starting — the
-    /health endpoint will surface the degraded state.
+    Port binding is immediate so container orchestrators (Render, K8s) detect
+    an open port and pass health probes without waiting for heavy model downloads
+    or database migrations.
     """
+    import asyncio
+
     # ---- 1. Structured logging ----
     setup_logging(settings.ENVIRONMENT)
     logger.info("startup_begin", environment=settings.ENVIRONMENT, version="1.0.0")
@@ -320,52 +369,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "Token validation via Supabase API will fail with 403.",
         )
 
-    # ---- 2. PostgreSQL ----
-    try:
-        _init_postgres()
-    except Exception as exc:
-        logger.error("postgres_init_failed", error=str(exc))
+    # Initial state
+    app.state.memory_manager = None
+    app.state.agent_graph = None
+    app.state.tool_registry = None
 
-    # ---- 3. Redis ----
-    try:
-        _init_redis()
-    except Exception as exc:
-        logger.error("redis_init_failed", error=str(exc))
+    # Spawn non-blocking background initialization
+    warmup_task = asyncio.create_task(_async_warmup(app))
+    app.state.warmup_task = warmup_task
 
-    # ---- 4. Qdrant ----
-    try:
-        _init_qdrant()
-    except Exception as exc:
-        logger.error("qdrant_init_failed", error=str(exc))
+    logger.info("server_ready_for_connections", message="FastAPI listening; warmup running in background")
 
-    # ---- 5. Memory Manager ----
-    try:
-        app.state.memory_manager = _build_memory_manager()
-    except Exception as exc:
-        app.state.memory_manager = None
-        logger.warning("memory_manager_init_failed", error=str(exc))
-
-    # ---- 6. Tool Registry & LangGraph Supervisor ----
-    try:
-        app.state.agent_graph = _build_langgraph_supervisor(app.state)
-    except Exception as exc:
-        app.state.agent_graph = None
-        logger.warning("langgraph_supervisor_init_failed", error=str(exc))
-        # Fallback tool registry if supervisor initialization failed
-        try:
-            if not getattr(app.state, "tool_registry", None):
-                from src.application.services.memory_service import MemoryService
-                mem_svc = MemoryService(app.state.memory_manager) if app.state.memory_manager else None
-                app.state.tool_registry = _build_tool_registry(memory_service=mem_svc)
-        except Exception:
-            app.state.tool_registry = None
-
-    logger.info("startup_complete", message="Application is ready to serve requests")
-
-    yield  # ← server is running
+    yield  # ← server is running immediately, port is open
 
     # ---- Graceful shutdown ----
     logger.info("shutdown_begin", message="Shutting down application...")
+    if not warmup_task.done():
+        warmup_task.cancel()
+        try:
+            await warmup_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     # Release Memory Manager database session
     try:
@@ -522,5 +546,7 @@ if __name__ == "__main__":
     import os
     import uvicorn
 
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("src.main:app", host="0.0.0.0", port=port, reload=False)
+    logger.info("server_starting", host=host, port=port)
+    uvicorn.run("src.main:app", host=host, port=port, reload=False)

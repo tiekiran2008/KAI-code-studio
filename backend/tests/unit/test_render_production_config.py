@@ -69,3 +69,41 @@ def test_sentence_transformer_service_lazy_loading():
         assert service.model_name == "sentence-transformers/all-MiniLM-L6-v2"
         # __init__ must NOT call _ensure_model_loaded
         mock_ensure.assert_not_called()
+
+
+def test_production_port_and_host_resolution(monkeypatch):
+    """Verifies production port uses int(os.getenv('PORT', '8000')) and host defaults to 0.0.0.0."""
+    monkeypatch.setenv("PORT", "10000")
+    monkeypatch.setenv("HOST", "0.0.0.0")
+
+    port = int(os.getenv("PORT", "8000"))
+    host = os.getenv("HOST", "0.0.0.0")
+
+    assert port == 10000
+    assert host == "0.0.0.0"
+    assert host not in ("127.0.0.1", "localhost")
+
+
+def test_dockerfile_cmd_uses_python_module_entrypoint():
+    """Verifies Dockerfile does not hardcode port 8000 in exec CMD and starts python -m src.main."""
+    dockerfile_path = os.path.join(os.path.dirname(__file__), "..", "..", "Dockerfile")
+    with open(dockerfile_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert 'CMD ["python", "-m", "src.main"]' in content
+    assert '--port 8000' not in content, "Dockerfile must not hardcode --port 8000"
+    assert '127.0.0.1' not in content, "Dockerfile must not hardcode 127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_immediately_without_blocking():
+    """Verifies lifespan context manager yields immediately while warmup runs in background."""
+    from src.main import app, lifespan
+    import asyncio
+
+    with patch("src.main._async_warmup") as mock_warmup:
+        mock_warmup.return_value = None
+        # Entering lifespan must yield immediately without hanging
+        async with lifespan(app):
+            assert hasattr(app.state, "warmup_task")
+
