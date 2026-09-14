@@ -46,14 +46,18 @@ class EvaluationAgent:
         for agent_name, out in outputs.items():
             prompt += f"\n[{agent_name}]: {out.get('summary', '')}\n{out.get('details', '')[:500]}\n"
 
-        llm_resp = await self.llm.complete(
-            prompt=prompt,
-            system=_SYSTEM_PROMPT,
-            max_tokens=512,
-            temperature=0.0,
-        )
+        try:
+            llm_resp = await self.llm.complete(
+                prompt=prompt,
+                system=_SYSTEM_PROMPT,
+                max_tokens=512,
+                temperature=0.0,
+            )
+            eval_result = self._parse_evaluation(llm_resp.content)
+        except Exception as exc:
+            logger.warning("evaluation_llm_failed_fallback: %s", exc)
+            eval_result = self._parse_evaluation("")
 
-        eval_result = self._parse_evaluation(llm_resp.content)
         confidence = eval_result.get("confidence_score", 0.80)
         is_passed = eval_result.get("is_passed", True)
 

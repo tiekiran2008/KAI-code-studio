@@ -1,7 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_PREFIX = import.meta.env.VITE_API_PREFIX || '/api/v1';
-
-const BASE_URL = `${API_BASE_URL}${API_PREFIX}/auth`;
+import { fetchClient, buildApiUrl } from './fetchClient';
 
 export interface User {
   id: string;
@@ -18,85 +15,46 @@ export interface UserSession {
   confirmation_required?: boolean;
 }
 
-
 export const authApi = {
   async login(email: string, password: string): Promise<UserSession> {
-    const response = await fetch(`${BASE_URL}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Login failed');
-    }
-
-    return response.json();
+    return fetchClient.post<UserSession>('/auth/login', { email, password });
   },
 
   async signup(email: string, password: string): Promise<UserSession> {
-    const response = await fetch(`${BASE_URL}/signup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Signup failed');
-    }
-
-    return response.json();
+    return fetchClient.post<UserSession>('/auth/signup', { email, password });
   },
 
   async logout(token: string): Promise<void> {
-    const response = await fetch(`${BASE_URL}/logout`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      console.error('Logout request failed');
+    try {
+      await fetch(buildApiUrl('/auth/logout'), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+    } catch (e) {
+      console.error('Logout request failed', e);
     }
   },
 
   async refreshToken(refreshToken: string): Promise<UserSession> {
-    const response = await fetch(`${BASE_URL}/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Token refresh failed');
-    }
-
-    return response.json();
+    return fetchClient.post<UserSession>('/auth/refresh', { refresh_token: refreshToken });
   },
 
   async getCurrentUser(token: string): Promise<{ user: any }> {
-    const response = await fetch(`${BASE_URL}/me`, {
+    const res = await fetch(buildApiUrl('/auth/me'), {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
       },
     });
 
-    if (!response.ok) {
-      const error = await response.json();
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
       throw new Error(error.detail || 'Failed to fetch user');
     }
 
-    return response.json();
+    return res.json();
   }
 };
+

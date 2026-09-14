@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useUIStore } from '../../store/useUIStore';
+import kaiLogo from '../../assets/branding/kai-logo.png';
 import { 
   LayoutDashboard, 
   GitBranch, 
@@ -12,7 +13,6 @@ import {
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Layers,
   FolderGit2,
   Users,
@@ -48,20 +48,22 @@ export const Sidebar: React.FC = () => {
       {/* Brand Header */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800/80">
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-cyan-400 p-0.5 shadow-glow flex items-center justify-center shrink-0">
-            <div className="w-full h-full bg-[#090d16] rounded-[10px] flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-indigo-400 animate-pulse" />
-            </div>
+          <div className="relative w-9 h-9 shrink-0 flex items-center justify-center">
+            <img
+              src={kaiLogo}
+              alt="KAI Code Studio Logo"
+              className="w-9 h-9 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.4)]"
+            />
           </div>
           {!sidebarCollapsed && (
             <div className="flex flex-col">
               <span className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-                Antigravity AI
+                KAI Code Studio
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
                   v1.0
                 </span>
               </span>
-              <span className="text-[11px] text-slate-400">Autonomous Engineering</span>
+              <span className="text-[11px] text-slate-400">Autonomous AI Engineering</span>
             </div>
           )}
         </div>

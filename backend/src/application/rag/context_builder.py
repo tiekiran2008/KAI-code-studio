@@ -52,6 +52,21 @@ def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int, toleranc
     return not (a_end + tolerance < b_start or b_end + tolerance < a_start)
 
 
+def _format_chunk_code(chunk: RerankedChunk) -> str:
+    """Format chunk code with line numbers to enable exact citation and grounding."""
+    lines = chunk.content.splitlines()
+    start = chunk.start_line or 1
+    # If already line-numbered, return as is
+    if lines and len(lines[0]) > 6 and lines[0][:4].strip().isdigit() and " | " in lines[0][:8]:
+        return chunk.content
+
+    numbered_lines = []
+    for idx, line in enumerate(lines):
+        line_num = start + idx
+        numbered_lines.append(f"{line_num:4d} | {line}")
+    return "\n".join(numbered_lines)
+
+
 class ContextBuilder(IContextBuilder):
     """
     Produces an optimised ContextWindow from a list of RerankedChunks.
@@ -61,7 +76,7 @@ class ContextBuilder(IContextBuilder):
     2. Group chunks by file_path.
     3. Within each file, merge chunks whose line ranges overlap.
     4. Apply token budget — drop lowest-scoring chunks first.
-    5. Format into a single context string with structured headers.
+    5. Format into a single context string with structured headers and line numbers.
     """
 
     def build_context(
@@ -103,7 +118,8 @@ class ContextBuilder(IContextBuilder):
 
         for chunk in merged_chunks:
             header = _chunk_header(chunk)
-            block = f"{header}\n```{chunk.language}\n{chunk.content}\n```"
+            code_text = _format_chunk_code(chunk)
+            block = f"{header}\n```{chunk.language}\n{code_text}\n```"
             chunk_tokens = _estimate_tokens(block)
 
             if used_tokens + chunk_tokens <= token_budget:
@@ -119,7 +135,8 @@ class ContextBuilder(IContextBuilder):
 
         for chunk in budgeted_chunks:
             header = _chunk_header(chunk)
-            block = f"{header}\n```{chunk.language}\n{chunk.content}\n```"
+            code_text = _format_chunk_code(chunk)
+            block = f"{header}\n```{chunk.language}\n{code_text}\n```"
             context_parts.append(block)
             final_file_map[chunk.file_path].append(chunk)
 

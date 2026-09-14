@@ -129,6 +129,8 @@ class AuditLog(BaseModel):
     id: str
     team_id: str
     actor_id: str
+    actor_name: Optional[str] = None   # Resolved from user_profiles; never raw UUID
+    actor_email: Optional[str] = None  # Resolved from user_profiles
     action: str
     target_type: str
     target_id: Optional[str] = None

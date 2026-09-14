@@ -14,6 +14,7 @@ interface TeamStoreState {
   error: string | null;
 
   fetchTeams: () => Promise<void>;
+  initializeTeams: () => Promise<void>;
   fetchTeam: (id: string) => Promise<Team>;
   createTeam: (data: TeamCreateParams) => Promise<Team>;
   updateTeam: (id: string, data: TeamUpdateParams) => Promise<Team>;
@@ -45,11 +46,45 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
   isLoading: false,
   error: null,
 
+  initializeTeams: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const teams = await teamsApi.getTeams();
+      let activeTeam: Team | null = null;
+      const savedId = localStorage.getItem('activeTeamId');
+      if (savedId) {
+        activeTeam = teams.find((t) => t.id === savedId) || null;
+      }
+      if (!activeTeam && teams.length > 0) {
+        activeTeam = teams[0];
+        localStorage.setItem('activeTeamId', teams[0].id);
+      } else if (!activeTeam) {
+        localStorage.removeItem('activeTeamId');
+      }
+      set({ teams, activeTeam, isLoading: false });
+    } catch (err: any) {
+      set({ error: err.message || 'Failed to initialize teams', isLoading: false });
+    }
+  },
+
   fetchTeams: async () => {
     set({ isLoading: true, error: null });
     try {
       const teams = await teamsApi.getTeams();
-      set({ teams, isLoading: false });
+      const currentActive = get().activeTeam;
+      let activeTeam = currentActive ? teams.find(t => t.id === currentActive.id) || null : null;
+      
+      if (!activeTeam) {
+        const savedId = localStorage.getItem('activeTeamId');
+        if (savedId) {
+          activeTeam = teams.find((t) => t.id === savedId) || null;
+        }
+      }
+      if (!activeTeam && teams.length > 0) {
+        activeTeam = teams[0];
+        localStorage.setItem('activeTeamId', teams[0].id);
+      }
+      set({ teams, activeTeam: activeTeam ?? get().activeTeam, isLoading: false });
     } catch (err: any) {
       set({ error: err.message || 'Failed to fetch teams', isLoading: false });
     }
@@ -59,6 +94,7 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const team = await teamsApi.getTeam(id);
+      localStorage.setItem('activeTeamId', team.id);
       set({ activeTeam: team, isLoading: false });
       return team;
     } catch (err: any) {
@@ -71,6 +107,7 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const team = await teamsApi.createTeam(data);
+      localStorage.setItem('activeTeamId', team.id);
       set((state) => ({
         teams: [...state.teams, team],
         activeTeam: team,
@@ -100,6 +137,9 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
   deleteTeam: async (id: string) => {
     try {
       await teamsApi.deleteTeam(id);
+      if (get().activeTeam?.id === id) {
+        localStorage.removeItem('activeTeamId');
+      }
       set((state) => ({
         teams: state.teams.filter((t) => t.id !== id),
         activeTeam: state.activeTeam?.id === id ? null : state.activeTeam,
@@ -166,6 +206,9 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
   leaveTeam: async (teamId: string) => {
     try {
       await teamsApi.leaveTeam(teamId);
+      if (get().activeTeam?.id === teamId) {
+        localStorage.removeItem('activeTeamId');
+      }
       set((state) => ({
         teams: state.teams.filter((t) => t.id !== teamId),
         activeTeam: state.activeTeam?.id === teamId ? null : state.activeTeam,
@@ -248,5 +291,12 @@ export const useTeamStore = create<TeamStoreState>((set, get) => ({
     }
   },
 
-  setActiveTeam: (team: Team | null) => set({ activeTeam: team }),
+  setActiveTeam: (team: Team | null) => {
+    if (team) {
+      localStorage.setItem('activeTeamId', team.id);
+    } else {
+      localStorage.removeItem('activeTeamId');
+    }
+    set({ activeTeam: team });
+  },
 }));

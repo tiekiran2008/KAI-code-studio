@@ -1,5 +1,14 @@
 import { fetchClient } from './fetchClient';
-import { Repository, RepositoryProvider, IndexingStatus } from '../types';
+import { Repository, RepositoryProvider, IndexingStatus, FileNode } from '../types';
+
+export interface FileContentResponse {
+  path: string;
+  name: string;
+  content: string;
+  size: number;
+  language: string;
+  is_binary: boolean;
+}
 
 export interface RepositoryCreateParams {
   url: string;
@@ -93,5 +102,16 @@ export const repositoriesApi = {
 
   async switchBranch(id: string, branch: string): Promise<Repository> {
     return fetchClient.patch<Repository>(`/repositories/${id}/branch`, { branch });
-  }
+  },
+
+  async getFileTree(id: string): Promise<FileNode[]> {
+    return fetchClient.get<FileNode[]>(`/repositories/${id}/tree`);
+  },
+
+  async getFileContent(id: string, path: string): Promise<FileContentResponse> {
+    return fetchClient.get<FileContentResponse>(`/repositories/${id}/files/content`, {
+      params: { path },
+    });
+  },
 };
+

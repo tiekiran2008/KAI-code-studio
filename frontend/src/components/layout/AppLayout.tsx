@@ -1,9 +1,11 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useUIStore } from '../../store/useUIStore';
+import { useTeamStore } from '../../store/teamStore';
 import { CommandPalette } from '../common/CommandPalette';
 import { Sidebar } from './Sidebar';
 import { TopNavbar } from './TopNavbar';
+import { AmbientCanvas } from '../ambient/AmbientCanvas';
 
 /**
  * Lightweight pure-CSS route loading fallback.
@@ -36,19 +38,27 @@ const RouteLoadingFallback: React.FC = () => (
 
 export const AppLayout: React.FC = () => {
   const { sidebarCollapsed } = useUIStore();
+  const initializeTeams = useTeamStore((state) => state.initializeTeams);
+
+  useEffect(() => {
+    initializeTeams();
+  }, [initializeTeams]);
 
   return (
-    <div className="min-h-screen flex bg-[#090d16] text-slate-100 transition-colors duration-300">
+    <div className="min-h-screen flex bg-[#090d16] text-slate-100 app-layout-container transition-colors duration-300 relative">
+      {/* Signature Ambient Focus Background Canvas */}
+      <AmbientCanvas />
+
       <Sidebar />
 
       <div
-        className={`flex-1 flex flex-col min-h-screen transition-all duration-300 ${
+        className={`flex-1 flex flex-col min-h-screen min-w-0 transition-all duration-300 relative z-10 ${
           sidebarCollapsed ? 'ml-20' : 'ml-64'
         }`}
       >
         <TopNavbar />
 
-        <main className="flex-1 p-6 relative">
+        <main className="flex-1 p-6 relative min-w-0 overflow-hidden flex flex-col">
           {/* Single Suspense boundary for all route-level lazy chunks */}
           <Suspense fallback={<RouteLoadingFallback />}>
             <Outlet />

@@ -108,6 +108,7 @@ describe('RefactoringTab Component', () => {
       />
     );
 
-    expect(screen.getByText('No refactoring suggestions found.')).toBeInTheDocument();
+    expect(screen.getByTestId('category-passed-refactoring')).toBeInTheDocument();
+    expect(screen.getByText(/Refactoring Analysis Passed/i)).toBeInTheDocument();
   });
 });

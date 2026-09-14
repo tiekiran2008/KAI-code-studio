@@ -27,11 +27,22 @@ def create_llm_provider() -> ILLMProvider:
     """
     preferred = settings.LLM_PROVIDER.lower()
 
+    _DEPRECATED_MODELS = {
+        "gemini-2.5-flash": "gemini-3.6-flash",
+        "gemini-2.5-pro": "gemini-3.6-flash",
+        "gemini-1.5-flash": "gemini-3.6-flash",
+        "gemini-1.5-pro": "gemini-3.6-flash",
+        "gemini-3.1-pro": "gemini-3.6-flash",
+    }
+
     def try_gemini() -> ILLMProvider:
         from src.infrastructure.llm.gemini_provider import GeminiProvider
+        gemini_model = _DEPRECATED_MODELS.get(settings.GEMINI_MODEL, settings.GEMINI_MODEL)
+        if not gemini_model or gemini_model.startswith("gemini-2.5") or gemini_model.startswith("gemini-1.5"):
+            gemini_model = "gemini-3.6-flash"
         return GeminiProvider(
             api_key=settings.GEMINI_API_KEY,
-            model=settings.GEMINI_MODEL,
+            model=gemini_model,
         )
 
     def try_openai() -> ILLMProvider:

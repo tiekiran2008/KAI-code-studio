@@ -290,7 +290,7 @@ class TestFixSuggestionAgent:
         """429 RESOURCE_EXHAUSTED raises LLMQuotaExceededError without fake fix."""
         mock_llm = MagicMock()
         mock_llm.complete = AsyncMock(
-            side_effect=Exception("429 RESOURCE_EXHAUSTED: Quota exceeded for gemini-2.5-flash")
+            side_effect=Exception("429 RESOURCE_EXHAUSTED: Quota exceeded for gemini-3.6-flash")
         )
         agent = FixSuggestionAgent(llm_provider=mock_llm)
         finding = _make_finding()
@@ -420,3 +420,71 @@ class TestFixSuggestionAgent:
         assert fix.validation_status == FixValidationStatus.PENDING
         assert fix.language == "ts"
         assert "manual review" in (fix.validation_message or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_19_workspace_root_reads_root_file_main_py(self, tmp_path):
+        """Root-level files like main.py are correctly read from workspace_root without override."""
+        main_py = tmp_path / "main.py"
+        main_py.write_text("def hello():\n    print('world')\n    return 42\n", encoding="utf-8")
+
+        mock_llm = MagicMock()
+        mock_llm.complete = AsyncMock(
+            return_value=MagicMock(
+                content='{"proposed_code": "def hello():\\n    print(\'fixed world\')\\n    return 42\\n", "explanation": "Fix greeting", "confidence_score": 0.95}'
+            )
+        )
+        agent = FixSuggestionAgent(llm_provider=mock_llm)
+        finding = _make_finding(file_path="main.py", line_number=2)
+
+        fix = await agent.generate_fix(
+            finding=finding,
+            finding_index=0,
+            repository_id="repo_real_root",
+            workspace_root=str(tmp_path),
+        )
+        assert fix.file_path == "main.py"
+        assert "print('world')" in fix.original_code
+        assert "print('fixed world')" in fix.proposed_code
+        assert "-    print('world')" in fix.diff
+        assert "+    print('fixed world')" in fix.diff
+
+    @pytest.mark.asyncio
+    async def test_20_workspace_root_reads_nested_file(self, tmp_path):
+        """Nested files like src/utils/calc.py are correctly read from workspace_root."""
+        nested_dir = tmp_path / "src" / "utils"
+        nested_dir.mkdir(parents=True)
+        calc_py = nested_dir / "calc.py"
+        calc_py.write_text("def multiply(a, b):\n    return a * b\n", encoding="utf-8")
+
+        mock_llm = MagicMock()
+        mock_llm.complete = AsyncMock(
+            return_value=MagicMock(
+                content='{"proposed_code": "def multiply(a: int, b: int) -> int:\\n    return a * b\\n", "explanation": "Add types", "confidence_score": 0.95}'
+            )
+        )
+        agent = FixSuggestionAgent(llm_provider=mock_llm)
+        finding = _make_finding(file_path="src/utils/calc.py", line_number=1)
+
+        fix = await agent.generate_fix(
+            finding=finding,
+            finding_index=0,
+            repository_id="repo_real_nested",
+            workspace_root=str(tmp_path),
+        )
+        assert fix.file_path == "src/utils/calc.py"
+        assert "def multiply(a, b):" in fix.original_code
+        assert "def multiply(a: int, b: int)" in fix.proposed_code
+
+    @pytest.mark.asyncio
+    async def test_21_no_adapter_and_no_workspace_raises_clear_error(self):
+        """When no adapter or workspace_root is available and no override, raises clear WorkflowExecutionError."""
+        mock_llm = MagicMock()
+        agent = FixSuggestionAgent(llm_provider=mock_llm)
+        finding = _make_finding(file_path="main.py", line_number=1)
+
+        with pytest.raises(WorkflowExecutionError, match="No workspace root or file adapter configured"):
+            await agent.generate_fix(
+                finding=finding,
+                finding_index=0,
+                repository_id="repo_unconfigured",
+            )

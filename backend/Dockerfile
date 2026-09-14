@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/lists/*
+# Install system dependencies (including git for repository cloning)
+RUN apt-get update && apt-get install -y libpq-dev gcc git curl && rm -rf /var/lib/apt/lists/*
 
 # Install pip dependencies
 COPY pyproject.toml ./

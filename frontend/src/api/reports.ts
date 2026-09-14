@@ -1,4 +1,4 @@
-import { fetchClient } from './fetchClient';
+import { fetchClient, buildApiUrl } from './fetchClient';
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -151,9 +151,9 @@ export const reportsApi = {
   },
 
   async exportReport(id: string, format: ExportFormat): Promise<Blob> {
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-    const token   = localStorage.getItem('access_token');
-    const res = await fetch(`${baseUrl}/reports/${id}/export?format=${format}`, {
+    const url = buildApiUrl(`/reports/${id}/export?format=${format}`);
+    const token = localStorage.getItem('access_token') || localStorage.getItem('auth_token');
+    const res = await fetch(url, {
       method:  'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });

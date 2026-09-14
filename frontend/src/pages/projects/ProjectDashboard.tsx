@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/projectStore';
 import { FolderGit2, Plus, GitBranch, Archive, Trash2, ChevronRight } from 'lucide-react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useUIStore } from '../../store/useUIStore';
 
 export const ProjectDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -31,6 +32,9 @@ export const ProjectDashboard: React.FC = () => {
       setName('');
       setDescription('');
       setShowCreate(false);
+      useUIStore.getState().addToast('Project created successfully', 'success');
+    } catch (err: any) {
+      useUIStore.getState().addToast(err.message || 'Failed to create project', 'error');
     } finally {
       setIsCreating(false);
     }

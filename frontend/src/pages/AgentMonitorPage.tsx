@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Cpu, Activity } from 'lucide-react';
 import { AgentFlowGraph } from '../components/agent/AgentFlowGraph';
 import { AgentDetailsPanel } from '../components/agent/AgentDetailsPanel';
+import { FocusAura } from '../components/ambient/FocusAura';
 
 export const AgentMonitorPage: React.FC = () => {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>('supervisor');
@@ -27,7 +28,7 @@ export const AgentMonitorPage: React.FC = () => {
       </div>
 
       {/* React Flow Interactive Graph */}
-      <div className="glass-panel p-6 rounded-2xl space-y-4">
+      <FocusAura area="agent" className="glass-panel p-6 rounded-2xl space-y-4">
         <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
           <Activity className="w-4 h-4 text-cyan-400" /> LangGraph Execution Flow (Interactive React Flow)
         </h2>
@@ -36,10 +37,12 @@ export const AgentMonitorPage: React.FC = () => {
           selectedAgentId={selectedAgentId}
           onSelectAgent={(id) => setSelectedAgentId(id)}
         />
-      </div>
+      </FocusAura>
 
       {/* Selected Agent Details Panel */}
-      <AgentDetailsPanel selectedAgentId={selectedAgentId} />
+      <FocusAura area="agent" className="rounded-2xl overflow-hidden">
+        <AgentDetailsPanel selectedAgentId={selectedAgentId} />
+      </FocusAura>
     </div>
   );
 };

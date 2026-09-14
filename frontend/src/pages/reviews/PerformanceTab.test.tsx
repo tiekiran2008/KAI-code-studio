@@ -50,6 +50,7 @@ describe('PerformanceTab', () => {
       />
     );
     
-    expect(screen.getByText('No Performance Issues Found')).toBeInTheDocument();
+    expect(screen.getByTestId('category-passed-performance')).toBeInTheDocument();
+    expect(screen.getByText(/Performance Analysis Passed/i)).toBeInTheDocument();
   });
 });

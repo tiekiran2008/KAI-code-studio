@@ -26,6 +26,7 @@ class FixApplicationStatus(str, Enum):
     APPLIED = "applied"
     APPLY_FAILED = "apply_failed"
     STALE = "stale"
+    ROLLED_BACK = "rolled_back"
 
 
 from src.domain.entities.verification import StaticVerificationResult

@@ -8,6 +8,7 @@ import {
   Cpu,
   Sun,
   Moon,
+  Sparkles,
   CheckCircle2,
   Sliders,
   Save,
@@ -19,6 +20,7 @@ import {
   User,
   Clock,
 } from 'lucide-react';
+import { useTheme } from '../components/providers/ThemeProvider';
 
 // ─── GitHub Integration Panel ─────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ const GitHubIntegrationPanel: React.FC = () => {
     status,
     isStatusLoading,
     statusError,
+    isExpired,
     isConnecting,
     isDisconnecting,
     fetchStatus,
@@ -35,6 +38,7 @@ const GitHubIntegrationPanel: React.FC = () => {
   } = useGitHubStore();
   const { addToast } = useUIStore();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = React.useState(false);
 
   // Handle callback query parameters injected by the backend OAuth redirect
   useEffect(() => {
@@ -70,8 +74,9 @@ const GitHubIntegrationPanel: React.FC = () => {
     fetchStatus();
   }, [fetchStatus]);
 
-  const handleDisconnect = async () => {
+  const handleConfirmDisconnect = async () => {
     await disconnect();
+    setShowDisconnectConfirm(false);
     addToast('GitHub account disconnected.', 'success');
   };
 
@@ -81,7 +86,38 @@ const GitHubIntegrationPanel: React.FC = () => {
         <Github className="w-4 h-4 text-slate-300" /> GitHub Integration
       </h2>
 
-      {statusError && (
+      {/* Expired Token Alert */}
+      {isExpired && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-amber-200">Your GitHub connection has expired.</p>
+              <p className="text-[11px] text-amber-300/80 mt-0.5">
+                Your authorization token is no longer valid or was revoked on GitHub. Please reconnect GitHub to restore full integration features.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={startOAuthFlow}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-glow"
+            >
+              <Github className="w-3.5 h-3.5" /> Reconnect GitHub
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDisconnectConfirm(true)}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+            >
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+
+      {statusError && !isExpired && (
         <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" /> {statusError}
         </div>
@@ -137,18 +173,50 @@ const GitHubIntegrationPanel: React.FC = () => {
             AI code review system.
           </p>
 
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            disabled={isDisconnecting}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-950/30 border border-rose-500/30 hover:bg-rose-950/60 text-rose-400 text-xs font-semibold transition-all disabled:opacity-60"
-          >
-            {isDisconnecting ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Disconnecting…</>
-            ) : (
-              <><Link2Off className="w-3.5 h-3.5" /> Disconnect GitHub Account</>
-            )}
-          </button>
+          {showDisconnectConfirm ? (
+            <div className="p-4 rounded-xl bg-slate-900 border border-rose-500/40 text-xs space-y-3 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-white">Disconnect GitHub account?</p>
+                  <p className="text-slate-400 text-[11px] mt-0.5">
+                    This will safely remove your stored GitHub access token and connection metadata. Your existing imported repositories and projects will not be deleted.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  disabled={isDisconnecting}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDisconnect}
+                  disabled={isDisconnecting}
+                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-glow disabled:opacity-50"
+                >
+                  {isDisconnecting ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /> Disconnecting…</>
+                  ) : (
+                    <><Link2Off className="w-3 h-3" /> Confirm Disconnect</>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDisconnectConfirm(true)}
+              disabled={isDisconnecting}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-950/30 border border-rose-500/30 hover:bg-rose-950/60 text-rose-400 text-xs font-semibold transition-all disabled:opacity-60"
+            >
+              <Link2Off className="w-3.5 h-3.5" /> Disconnect GitHub Account
+            </button>
+          )}
         </div>
       ) : (
         /* ── Disconnected State ── */
@@ -191,7 +259,17 @@ const GitHubIntegrationPanel: React.FC = () => {
 
 export const SettingsPage: React.FC = () => {
   const { llm, preferences, updateLLM, updatePreferences } = useSettingsStore();
-  const { theme, toggleTheme, addToast } = useUIStore();
+  const { addToast } = useUIStore();
+  const {
+    theme,
+    setTheme,
+    ambientIntensity,
+    setAmbientIntensity,
+    focusSession,
+    setFocusSession,
+    reduceMotion,
+    setReduceMotion,
+  } = useTheme();
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,39 +345,147 @@ export const SettingsPage: React.FC = () => {
         </div>
 
         {/* User Preferences & Appearance */}
-        <div className="glass-panel p-6 rounded-2xl space-y-4">
+        <div className="glass-panel p-6 rounded-2xl space-y-5">
           <h2 className="text-base font-semibold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
             <Sliders className="w-4 h-4 text-purple-400" /> UI &amp; Code Editor Preferences
           </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-medium">Theme</label>
-              <div className="flex gap-2">
+          <div className="space-y-4 text-xs">
+            <div className="space-y-2">
+              <label className="text-slate-300 font-medium">Theme Selection</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {/* Dark Glass */}
                 <button
                   type="button"
-                  onClick={toggleTheme}
-                  className={`flex-1 py-2 rounded-xl border flex items-center justify-center gap-2 font-medium transition-all ${
+                  onClick={() => setTheme('dark')}
+                  className={`p-3.5 rounded-xl border flex flex-col items-start gap-1.5 transition-all text-left min-w-0 ${
                     theme === 'dark'
-                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-glow'
-                      : 'bg-slate-900 text-slate-400 border-slate-800'
+                      ? 'bg-indigo-600/20 text-white border-indigo-500 shadow-glow'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <Moon className="w-4 h-4 text-indigo-300" /> Dark Glass (Default)
+                  <div className="flex items-center gap-2 font-medium">
+                    <Moon className="w-4 h-4 text-indigo-400 shrink-0" /> Dark Glass
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-normal">Default dark developer environment</span>
                 </button>
+
+                {/* Light Mode */}
                 <button
                   type="button"
-                  onClick={toggleTheme}
-                  className={`flex-1 py-2 rounded-xl border flex items-center justify-center gap-2 font-medium transition-all ${
+                  onClick={() => setTheme('light')}
+                  className={`p-3.5 rounded-xl border flex flex-col items-start gap-1.5 transition-all text-left min-w-0 ${
                     theme === 'light'
-                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-glow'
-                      : 'bg-slate-900 text-slate-400 border-slate-800'
+                      ? 'bg-indigo-600/20 text-white border-indigo-500 shadow-glow'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <Sun className="w-4 h-4 text-amber-400" /> Light Mode
+                  <div className="flex items-center gap-2 font-medium">
+                    <Sun className="w-4 h-4 text-amber-400 shrink-0" /> Light Mode
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-normal">High-contrast daylight theme</span>
+                </button>
+
+                {/* Ambient Focus */}
+                <button
+                  type="button"
+                  onClick={() => setTheme('ambient')}
+                  className={`p-3.5 rounded-xl border flex flex-col items-start gap-1.5 transition-all text-left min-w-0 sm:col-span-2 lg:col-span-1 ${
+                    theme === 'ambient'
+                      ? 'bg-gradient-to-br from-indigo-950/80 to-purple-950/80 text-cyan-200 border-cyan-500/50 shadow-glow'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-medium flex-wrap">
+                    <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>Ambient Focus</span>
+                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[9px] font-semibold uppercase tracking-wider shrink-0">
+                      Signature
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-normal">Atmospheric depth &amp; active focus auras</span>
                 </button>
               </div>
             </div>
+
+            {/* Ambient Focus Customization Panel */}
+            {theme === 'ambient' && (
+              <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 space-y-4 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between border-b border-indigo-500/20 pb-2">
+                  <div className="flex items-center gap-2 text-indigo-300 font-semibold">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Ambient Focus Customization
+                  </div>
+                  <span className="text-[11px] text-slate-400">GPU-accelerated atmospheric layers</span>
+                </div>
+
+                {/* Ambient Intensity */}
+                <div className="space-y-1.5">
+                  <label className="text-slate-300 font-medium">Atmospheric Intensity</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['minimal', 'balanced', 'immersive'] as const).map((level) => (
+                      <button
+                        key={level}
+                        type="button"
+                        onClick={() => setAmbientIntensity(level)}
+                        className={`py-1.5 px-3 rounded-lg border text-xs capitalize transition-all ${
+                          ambientIntensity === level
+                            ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow'
+                            : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        {level}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Focus Session Mode Toggle */}
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <div className="text-slate-200 font-medium">Focus Session Mode</div>
+                    <div className="text-[11px] text-slate-400">
+                      Dims secondary navigation and maximizes visual prominence on your active workspace
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFocusSession(!focusSession)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      focusSession ? 'bg-indigo-600' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        focusSession ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Reduce Motion Toggle */}
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <div className="text-slate-200 font-medium">Reduce Motion</div>
+                    <div className="text-[11px] text-slate-400">
+                      Pauses ambient color field movement while preserving full static atmospheric depth
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReduceMotion(!reduceMotion)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      reduceMotion ? 'bg-indigo-600' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        reduceMotion ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-slate-300 font-medium">Preferred Primary Language</label>

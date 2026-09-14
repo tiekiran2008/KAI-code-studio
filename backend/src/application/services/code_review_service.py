@@ -66,6 +66,7 @@ class CodeReviewService:
         modularity_score: float = None,
         testability_score: float = None,
         dependency_analysis: dict = None,
+        category_metadata: dict = None,
     ) -> Optional[DBCodeReview]:
         """Update review status and optional result data."""
         review = self.repo.get_by_id(review_id)
@@ -128,6 +129,8 @@ class CodeReviewService:
             review.testability_score = testability_score
         if dependency_analysis is not None:
             review.dependency_analysis_json = dependency_analysis
+        if category_metadata is not None:
+            review.category_metadata_json = category_metadata
         review.confidence_score = confidence_score
         if duration_ms is not None:
             review.duration_ms = duration_ms
@@ -149,6 +152,7 @@ class CodeReviewService:
         finding_index: int,
         fix_suggestion: FixSuggestion,
         user_id: Optional[str] = None,
+        overwrite: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Persist a generated FixSuggestion into the correct findings_json slot.
 
@@ -171,9 +175,9 @@ class CodeReviewService:
                 f"finding_index {finding_index} is out of range (0-{len(findings) - 1})"
             )
 
-        # Idempotency: return existing suggestion without calling LLM again
+        # Idempotency check unless explicit overwrite requested
         existing_fix = findings[finding_index].get("fix_suggestion")
-        if existing_fix:
+        if existing_fix and not overwrite:
             return existing_fix
 
         # Build the complete updated finding, preserving all original fields
@@ -186,6 +190,48 @@ class CodeReviewService:
         self.repo.update(review)
 
         return updated_finding["fix_suggestion"]
+
+    def rollback_finding_fix(
+        self,
+        review_id: str,
+        finding_index: int,
+        user_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Reset application and verification status after an applied fix is rolled back.
+
+        Returns the updated fix dict on success, None if review not found.
+        """
+        review = self.repo.get_by_id(review_id, user_id=user_id)
+        if not review:
+            return None
+
+        findings: list = list(review.findings_json or [])
+        if finding_index < 0 or finding_index >= len(findings):
+            raise IndexError(
+                f"finding_index {finding_index} is out of range (0-{len(findings) - 1})"
+            )
+
+        existing_fix = findings[finding_index].get("fix_suggestion")
+        if not existing_fix:
+            raise KeyError("No fix suggestion exists for this finding")
+
+        updated_fix = dict(existing_fix)
+        updated_fix["application_status"] = FixApplicationStatus.ROLLED_BACK.value
+        updated_fix["applied_at"] = None
+        updated_fix["application_error"] = None
+        updated_fix["static_verification"] = None
+        updated_fix["test_verification"] = None
+        updated_fix["git_commit"] = None
+        updated_fix["git_push"] = None
+        updated_fix["git_pull_request"] = None
+
+        updated_finding = dict(findings[finding_index])
+        updated_finding["fix_suggestion"] = updated_fix
+        findings[finding_index] = updated_finding
+        review.findings_json = findings
+        self.repo.update(review)
+
+        return updated_fix
 
     def update_finding_decision(
         self,

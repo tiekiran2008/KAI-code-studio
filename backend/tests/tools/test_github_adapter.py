@@ -49,4 +49,5 @@ async def test_execute_http_error(adapter):
         result = await adapter.execute(owner="test", repo="repo", action="commits")
         
         assert result.success is False
-        assert "404" in result.error
+        assert "not found" in result.error.lower()
+

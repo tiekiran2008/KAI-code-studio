@@ -124,12 +124,18 @@ async def query_repository(
         return _map_response(response)
 
     except Exception as exc:
-        # Check if it's an LLM configuration issue
         error_str = str(exc).lower()
         if any(kw in error_str for kw in ["api_key", "apikey", "not configured", "llmconfiguration"]):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="LLM provider is not configured. Set GEMINI_API_KEY or OPENAI_API_KEY.",
+            )
+        if any(kw in error_str for kw in ["429", "resource_exhausted", "quota", "rate limit"]):
+            logger.warning("rag_query_quota_exceeded", error=str(exc)[:200])
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="AI provider rate limit reached. Please retry shortly.",
+                headers={"Retry-After": "60"},
             )
         logger.error("rag_query_error: %s", exc, exc_info=True)
         raise HTTPException(

@@ -158,7 +158,7 @@ describe('Localized Error Standardization & Safe Rendering', () => {
       expect(screen.getByText('SQL injection risk in user query')).toBeInTheDocument();
     });
 
-    const genButtons = screen.getAllByRole('button', { name: /Generate Fix/i });
+    const genButtons = screen.getAllByRole('button', { name: /(Auto Fix|Generate Fix)/i });
     fireEvent.click(genButtons[0]);
 
     await waitFor(() => {
@@ -178,7 +178,7 @@ describe('Localized Error Standardization & Safe Rendering', () => {
       expect(screen.getByText('SQL injection risk in user query')).toBeInTheDocument();
     });
 
-    const genButtons = screen.getAllByRole('button', { name: /Generate Fix/i });
+    const genButtons = screen.getAllByRole('button', { name: /(Auto Fix|Generate Fix)/i });
     fireEvent.click(genButtons[0]);
 
     await waitFor(() => {

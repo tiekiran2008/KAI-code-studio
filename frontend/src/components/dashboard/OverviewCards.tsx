@@ -40,7 +40,9 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({ repoCount, analyti
           <BrainCircuit className="w-4 h-4 text-purple-400" />
         </div>
         <div className="text-2xl font-bold text-white">
-          {analytics?.memoryHitRate ? `${(analytics.memoryHitRate * 100).toFixed(1)}%` : '---'}
+          {analytics?.memoryHitRate !== undefined && analytics.memoryHitRate !== null
+            ? `${(analytics.memoryHitRate > 1 ? analytics.memoryHitRate : analytics.memoryHitRate * 100).toFixed(1)}%`
+            : '---'}
         </div>
         <div className="text-[11px] text-purple-400 flex items-center gap-1">
           <Database className="w-3.5 h-3.5" /> Episodic & Semantic
@@ -53,7 +55,9 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({ repoCount, analyti
           <Cpu className="w-4 h-4 text-emerald-400" />
         </div>
         <div className="text-2xl font-bold text-white">
-          {analytics?.averageConfidence ? `${(analytics.averageConfidence * 100).toFixed(1)}%` : '---'}
+          {analytics?.averageConfidence !== undefined && analytics.averageConfidence !== null
+            ? `${(analytics.averageConfidence > 1 ? analytics.averageConfidence : analytics.averageConfidence * 100).toFixed(1)}%`
+            : '---'}
         </div>
         <div className="text-[11px] text-emerald-400 flex items-center gap-1">
           <CheckCircle2 className="w-3.5 h-3.5" /> Evaluation Passed

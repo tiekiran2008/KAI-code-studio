@@ -204,7 +204,7 @@ class TestFixToPRLifecycleE2E:
         review_service_mock = MagicMock()
         review_service_mock.get_review.side_effect = lambda rid, user_id=None: store.get_review(rid, user_id)
         
-        def update_finding_fix_mock(review_id, finding_index, fix_suggestion, user_id):
+        def update_finding_fix_mock(review_id, finding_index, fix_suggestion, user_id, overwrite=False, **kwargs):
             r = store.get_review(review_id, user_id)
             r.findings_json[finding_index]["fix_suggestion"] = fix_suggestion.model_dump() if hasattr(fix_suggestion, "model_dump") else fix_suggestion
             return r.findings_json[finding_index]["fix_suggestion"]

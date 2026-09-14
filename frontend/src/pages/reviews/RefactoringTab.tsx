@@ -3,7 +3,13 @@ import {
   RefactoringFinding,
   FindingSeverity,
   RefactoringCategory,
+  CategoryAnalysisMetadata,
+  CodeReview,
 } from '../../api/reviews';
+import {
+  CategoryStatusCard,
+  FindingSeverityCounts,
+} from './CategoryStatusCard';
 import {
   Search,
   Filter,
@@ -259,6 +265,8 @@ interface RefactoringTabProps {
   estimatedMaintainabilityImprovement: number;
   estimatedTechnicalDebtReduction?: number;
   estimatedComplexityReduction?: number;
+  reviewStatus?: CodeReview['status'];
+  categoryMetadata?: CategoryAnalysisMetadata;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────────
@@ -270,6 +278,8 @@ export const RefactoringTab: React.FC<RefactoringTabProps> = ({
   estimatedMaintainabilityImprovement,
   estimatedTechnicalDebtReduction = 0,
   estimatedComplexityReduction = 0,
+  reviewStatus = 'completed',
+  categoryMetadata,
 }) => {
   const [search, setSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<FindingSeverity | 'all'>('all');
@@ -278,6 +288,14 @@ export const RefactoringTab: React.FC<RefactoringTabProps> = ({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 10;
+
+  const severityCounts = useMemo(() => {
+    const counts: FindingSeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => {
+      if (f.priority in counts) counts[f.priority as keyof FindingSeverityCounts]++;
+    });
+    return counts;
+  }, [findings]);
 
   // Derived counts for summary cards
   const priorityCounts = useMemo(() => {
@@ -338,18 +356,29 @@ export const RefactoringTab: React.FC<RefactoringTabProps> = ({
   // Empty state
   if (!findings.length) {
     return (
-      <div className="glass-panel p-6 rounded-2xl">
-        <div className="flex flex-col items-center justify-center py-20 space-y-3 text-slate-400">
-          <CheckCircle2 className="w-12 h-12 text-emerald-400 opacity-50" />
-          <p className="text-sm font-medium text-slate-300">No refactoring suggestions found.</p>
-          <p className="text-xs text-slate-500">The code looks well-structured.</p>
-        </div>
+      <div className="space-y-6">
+        <CategoryStatusCard
+          categoryKey="refactoring"
+          reviewStatus={reviewStatus}
+          metadata={categoryMetadata}
+          findingsCount={0}
+          severityCounts={severityCounts}
+        />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Category header when findings exist */}
+      <CategoryStatusCard
+        categoryKey="refactoring"
+        reviewStatus={reviewStatus}
+        metadata={categoryMetadata}
+        findingsCount={findings.length}
+        severityCounts={severityCounts}
+      />
+
       {/* Summary Metrics Dashboard */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Maintainability Improvement Ring */}

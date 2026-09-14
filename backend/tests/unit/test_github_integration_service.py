@@ -41,7 +41,11 @@ def encryptor():
 def service(db_session, encryptor):
     # Clear in-memory state cache between tests
     GitHubIntegrationService._state_cache.clear()
-    return GitHubIntegrationService(db_session=db_session, encryptor=encryptor)
+    with patch("src.application.services.github_integration_service.settings") as mock_settings:
+        mock_settings.GITHUB_CLIENT_ID = "test_client_id_123"
+        mock_settings.GITHUB_CLIENT_SECRET = "test_client_secret_456"
+        mock_settings.GITHUB_REDIRECT_URI = "http://localhost:8000/api/v1/integrations/github/callback"
+        yield GitHubIntegrationService(db_session=db_session, encryptor=encryptor)
 
 
 FAKE_USER_ID = str(uuid.uuid4())
@@ -222,3 +226,78 @@ class TestGetDecryptedToken:
 
         token = service.get_decrypted_token(FAKE_USER_ID)
         assert token == raw_token
+
+
+# ─── List Repositories & Error Handling Tests ──────────────────────────────────
+
+class TestListUserRepositories:
+    @pytest.mark.asyncio
+    async def test_list_repositories_success(self, service, db_session):
+        record = DBGitHubIntegration(
+            id=str(uuid.uuid4()),
+            user_id=FAKE_USER_ID,
+            github_user_id="77777",
+            github_username="tokenuser",
+            avatar_url=None,
+            access_token_encrypted=service.encryptor.encrypt("valid_token"),
+            token_type="bearer",
+            scope="repo",
+        )
+        db_session.add(record)
+        db_session.commit()
+
+        mock_repos = [
+            {
+                "id": 101,
+                "name": "cool-repo",
+                "full_name": "tokenuser/cool-repo",
+                "owner": {"login": "tokenuser"},
+                "html_url": "https://github.com/tokenuser/cool-repo",
+                "clone_url": "https://github.com/tokenuser/cool-repo.git",
+                "private": False,
+                "default_branch": "main",
+                "description": "A cool repo",
+                "stargazers_count": 5,
+                "language": "TypeScript",
+                "updated_at": "2026-09-01T00:00:00Z",
+            }
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_repos
+
+        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+            repos = await service.list_user_repositories(FAKE_USER_ID)
+
+        assert len(repos) == 1
+        assert repos[0]["name"] == "cool-repo"
+        assert repos[0]["is_private"] is False
+
+    @pytest.mark.asyncio
+    async def test_list_repositories_401_raises_permission_error(self, service, db_session):
+        record = DBGitHubIntegration(
+            id=str(uuid.uuid4()),
+            user_id=FAKE_USER_ID,
+            github_user_id="77777",
+            github_username="tokenuser",
+            avatar_url=None,
+            access_token_encrypted=service.encryptor.encrypt("expired_token"),
+            token_type="bearer",
+            scope="repo",
+        )
+        db_session.add(record)
+        db_session.commit()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "Bad credentials"
+
+        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+            with pytest.raises(PermissionError, match="GitHub connection has expired or token was revoked"):
+                await service.list_user_repositories(FAKE_USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_list_repositories_unconnected_raises_value_error(self, service):
+        with pytest.raises(ValueError, match="GitHub account is not connected"):
+            await service.list_user_repositories("nonexistent_user")

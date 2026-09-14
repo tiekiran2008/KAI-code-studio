@@ -76,6 +76,25 @@ class SupervisorAgent:
                 }],
             }
 
+        # Fast-path: if only 1 specialized agent output exists and no tool results are pending,
+        # directly use the specialized agent's answer to avoid an unnecessary extra LLM synthesis call
+        if len(outputs) == 1 and not tool_results:
+            single_agent_name, single_out = next(iter(outputs.items()))
+            details = single_out.get("details", "")
+            if details and len(details.strip()) > 50:
+                latency = round((time.perf_counter() - start) * 1000, 2)
+                logger.info("supervisor_fastpath_single_output", agent=single_agent_name)
+                return {
+                    "final_answer": details,
+                    "next_agent": "__end__",
+                    "sender": AgentType.SUPERVISOR.value,
+                    "execution_trace": [{
+                        "agent": AgentType.SUPERVISOR.value,
+                        "action": f"passthrough_{single_agent_name}_output",
+                        "latency_ms": latency,
+                    }],
+                }
+
         # 2. Build synthesis prompt
         prompt = f"""You are the Lead Software Architecture Supervisor.
 User Question: {query}
@@ -98,14 +117,28 @@ Deliverables:
 
         prompt += "\nFormat the response using clean Markdown with appropriate headings and code blocks."
 
+        supervisor_system_prompt = (
+            "You are an expert Principal AI Software Architect consolidating multi-agent engineering deliverables.\n\n"
+            "STRICT GROUNDING & CITATION RULES:\n"
+            "1. Every technical claim must come directly from the agent deliverables and retrieved code evidence.\n"
+            "2. NEVER invent files, functions, line numbers, or metrics (do not produce fake scores like 52/100 or 12.5h).\n"
+            "3. PRESERVE EXACT CITATIONS: Keep all file and line citations in the format: Evidence: `path/to/file.ext#Lx-Ly` — `function_or_symbol_name()`\n"
+            "4. STRUCTURED FINDING FORMAT: When listing weaknesses, bugs, or architectural issues, format each as:\n"
+            "   ### Weakness <N> — <Title>\n"
+            "   Evidence: `file.py#Lx-Ly` — `function_name()`\n\n"
+            "   Observed code:\n"
+            "   <Brief factual description directly from cited lines>\n\n"
+            "   Why it matters:\n"
+            "   <Architectural impact>\n\n"
+            "   Recommended improvement:\n"
+            "   <Concrete fix based on existing architecture>\n"
+        )
         available_tools = await self._get_available_tools()
-        
-        # 3. Call LLM with tool capabilities
-        # (Assuming self.llm.complete supports a `tools` parameter; using a fallback if not)
+
         try:
             llm_resp = await self.llm.complete(
                 prompt=prompt,
-                system="You are an expert Principal AI Software Architect consolidating multi-agent reports.",
+                system=supervisor_system_prompt,
                 max_tokens=2048,
                 temperature=0.2,
                 tools=available_tools if available_tools else None
@@ -114,7 +147,7 @@ Deliverables:
             # Fallback if complete() doesn't accept tools
             llm_resp = await self.llm.complete(
                 prompt=prompt,
-                system="You are an expert Principal AI Software Architect consolidating multi-agent reports.",
+                system=supervisor_system_prompt,
                 max_tokens=2048,
                 temperature=0.2,
             )

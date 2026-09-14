@@ -1,9 +1,10 @@
 import { lazy } from 'react';
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AuthLayout } from '../components/layout/AuthLayout';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { ProtectedRoute } from '../components/auth/ProtectedRoute';
+import { GitHubCallbackHandler } from '../components/auth/GitHubCallbackHandler';
 
 // ---------------------------------------------------------------------------
 // Route-level lazy imports — Phase 11.7B-1
@@ -81,6 +82,9 @@ const PendingInvitationsPage = lazy(() =>
 const RoleManagementPage = lazy(() =>
   import('../pages/teams/RoleManagementPage').then(m => ({ default: m.RoleManagementPage }))
 );
+const TeamSettingsPage = lazy(() =>
+  import('../pages/teams/TeamSettingsPage').then(m => ({ default: m.TeamSettingsPage }))
+);
 
 // Review pages — these are the primary heavyweight routes
 const CodeReviewPage = lazy(() =>
@@ -113,6 +117,9 @@ const ForgotPasswordPage = lazy(() =>
 const ResetPasswordPage = lazy(() =>
   import('../pages/auth/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage }))
 );
+const OAuthCallbackPage = lazy(() =>
+  import('../pages/auth/OAuthCallbackPage').then(m => ({ default: m.OAuthCallbackPage }))
+);
 
 // ---------------------------------------------------------------------------
 // Router definition
@@ -133,8 +140,12 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'repositories', element: <RepositoryManagerPage /> },
+      { path: 'repository', element: <RepositoryManagerPage /> },
       { path: 'repositories/import', element: <RepositoryImportWizard /> },
+      { path: 'repository/import', element: <RepositoryImportWizard /> },
+      { path: 'repositories/new', element: <RepositoryImportWizard /> },
       { path: 'repositories/:repoId', element: <RepositoryDetails /> },
+      { path: 'repository/:repoId', element: <RepositoryDetails /> },
       { path: 'projects', element: <ProjectDashboard /> },
       { path: 'projects/:projectId', element: <ProjectDetails /> },
       { path: 'workspace', element: <WorkspacePage /> },
@@ -151,10 +162,14 @@ export const router = createBrowserRouter([
       { path: 'teams/members', element: <TeamMembersPage /> },
       { path: 'teams/invitations', element: <PendingInvitationsPage /> },
       { path: 'teams/roles', element: <RoleManagementPage /> },
+      { path: 'teams/settings', element: <TeamSettingsPage /> },
       { path: 'reviews', element: <CodeReviewPage /> },
       { path: 'reviews/history', element: <ReviewHistoryPage /> },
       { path: 'reviews/:reviewId', element: <ReviewResultsPage /> },
       { path: 'reports', element: <ReportsPage /> },
+      { path: 'api/v1/integrations/github/callback', element: <GitHubCallbackHandler /> },
+      { path: 'settings/github/callback', element: <GitHubCallbackHandler /> },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
   {
@@ -165,6 +180,21 @@ export const router = createBrowserRouter([
       { path: 'signup', element: <SignupPage /> },
       { path: 'forgot-password', element: <ForgotPasswordPage /> },
       { path: 'reset-password', element: <ResetPasswordPage /> },
+      { path: 'callback', element: <OAuthCallbackPage /> },
+      { path: 'github/callback', element: <GitHubCallbackHandler /> },
+      { path: '*', element: <Navigate to="/auth/login" replace /> },
     ],
+  },
+  {
+    path: '/auth/callback',
+    element: <OAuthCallbackPage />,
+  },
+  {
+    path: '/api/v1/integrations/github/callback',
+    element: <GitHubCallbackHandler />,
+  },
+  {
+    path: '*',
+    element: <Navigate to="/" replace />,
   },
 ]);

@@ -26,7 +26,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import redis
 
@@ -39,6 +39,7 @@ from src.application.rag.prompt_builder import PromptBuilder
 from src.application.rag.conversation_manager import ConversationManager
 from src.application.rag.response_validator import ResponseValidator
 from src.application.rag.citation_generator import CitationGenerator
+from src.application.rag.citation_validator import CitationValidator
 from src.domain.interfaces.llm import ILLMProvider
 from src.domain.interfaces.embedding import IEmbeddingService
 from src.domain.interfaces.vector_db import IVectorDB
@@ -82,6 +83,7 @@ class QueryProcessor:
         self._conversation = ConversationManager(redis_client)
         self._validator = ResponseValidator()
         self._citation_gen = CitationGenerator()
+        self._citation_validator = CitationValidator()
         self._redis = redis_client
 
     async def process(
@@ -202,15 +204,22 @@ class QueryProcessor:
                 f"{settings.MIN_CONFIDENCE_THRESHOLD:.1%})_"
             )
 
-        # ── 10. Citation Generation ──────────────────────────────────────
-        citations = self._citation_gen.generate(llm_response.content, ranked_chunks)
+        # ── 10. Citation Generation & Validation ─────────────────────────
+        raw_citations = self._citation_gen.generate(llm_response.content, ranked_chunks)
+        val_result = self._citation_validator.validate_and_reconcile(
+            answer=llm_response.content,
+            chunks=ranked_chunks,
+            existing_citations=raw_citations,
+        )
+        citations = val_result.verified_citations
+        effective_confidence = round(min(validation.confidence, val_result.grounding_score), 3)
 
         # ── 11. Conversation update ──────────────────────────────────────
         self._conversation.add_user_turn(history, question)
         self._conversation.add_assistant_turn(
             history,
             answer,
-            metadata={"intent": parsed_query.intent.value, "confidence": validation.confidence},
+            metadata={"intent": parsed_query.intent.value, "confidence": effective_confidence},
         )
 
         # ── 12. Finalise response ────────────────────────────────────────
@@ -272,6 +281,49 @@ class QueryProcessor:
                 logger.debug("rag_cache_write_failed: %s", exc)
 
         return response
+
+    async def retrieve_context_only(
+        self,
+        question: str,
+        repo_id: str,
+        session_id: Optional[str] = None,
+        top_k: int = None,
+        token_budget: int = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute retrieval and context assembly pipeline WITHOUT making an LLM completion call.
+        Returns context_text, citations, and ranked_chunks for multi-agent workflows.
+        """
+        start_time = time.perf_counter()
+        top_k = top_k or settings.TOP_K_CHUNKS
+        token_budget = token_budget or settings.CONTEXT_WINDOW_TOKENS
+
+        parsed_query = self._understanding.classify_intent(question)
+        parsed_query.repo_id = repo_id
+        parsed_query.session_id = session_id
+
+        parsed_query = self._rewriter.rewrite(parsed_query)
+
+        raw_results = await self._retriever.retrieve(parsed_query, limit=settings.MAX_RETRIEVED_CHUNKS)
+        ranked_chunks = self._reranker.rerank(raw_results, parsed_query, top_k=top_k)
+        context_window = self._context_builder.build_context(ranked_chunks, token_budget=token_budget)
+        citations = self._citation_gen.generate("", ranked_chunks)
+
+        total_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "rag_context_only_complete",
+            chunks_count=len(ranked_chunks),
+            citations_count=len(citations),
+            retrieval_ms=round(total_ms, 1),
+        )
+
+        return {
+            "context_text": context_window.formatted_context,
+            "citations": citations,
+            "ranked_chunks": ranked_chunks,
+            "intent": parsed_query.intent,
+            "total_tokens": context_window.total_tokens,
+        }
 
     # ------------------------------------------------------------------
     # Serialisation helpers for Redis caching

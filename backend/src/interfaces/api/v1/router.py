@@ -13,6 +13,8 @@ from .invitations import router as invitations_router
 from .reviews import router as reviews_router
 from .reports import router as reports_router
 from .integrations import router as integrations_router
+from .analytics import router as analytics_router
+from .conversations import router as conversations_router
 
 api_router = APIRouter()
 
@@ -30,5 +32,8 @@ api_router.include_router(invitations_router)
 api_router.include_router(reviews_router)
 api_router.include_router(reports_router)
 api_router.include_router(integrations_router)
+api_router.include_router(analytics_router)
+api_router.include_router(conversations_router)
+
 
 

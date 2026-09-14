@@ -26,7 +26,7 @@ from src.infrastructure.filesystem.path_sandbox import PathSandboxService
 class GitWorkingTreeManager:
     """Manages Git working tree inspection and isolated branch committing."""
 
-    DEFAULT_BOT_NAME = "Antigravity Reviewer"
+    DEFAULT_BOT_NAME = "KAI Code Studio Reviewer"
     DEFAULT_BOT_EMAIL = "ai-reviewer@local"
 
     # Branch name regex: starts with alphanumeric, contains only safe chars, max 100 chars

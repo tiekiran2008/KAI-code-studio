@@ -40,6 +40,10 @@ class RepositoryIndexProgress(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+# Global thread-safe progress store keyed by repository_id
+_GLOBAL_PROGRESS_STORE: Dict[str, RepositoryIndexProgress] = {}
+
+
 class RepositoryIngestionService:
     """Service that orchestrates repository cloning, parsing, chunking, and vector indexing."""
 
@@ -48,12 +52,13 @@ class RepositoryIngestionService:
         index_manager: IndexManager,
         repo_repository: RepositoryRepository,
         code_chunker: Optional[CodeChunker] = None,
+        session_factory: Optional[Any] = None,
     ):
         self.index_manager = index_manager
         self.repo_repository = repo_repository
         self.code_chunker = code_chunker or CodeChunker()
-        # In-memory thread-safe progress store keyed by repository_id
-        self._progress_store: Dict[str, RepositoryIndexProgress] = {}
+        self.session_factory = session_factory
+        self._progress_store: Dict[str, RepositoryIndexProgress] = _GLOBAL_PROGRESS_STORE
 
     def get_progress(self, repo_id: str) -> RepositoryIndexProgress:
         """Get the current or historical indexing progress for a repository."""
@@ -71,6 +76,7 @@ class RepositoryIngestionService:
                 stage="completed" if status == "indexed" else status,
                 progress=progress,
                 chunks_created=db_repo.chunks_count or 0,
+                error=getattr(db_repo, "indexing_error", None),
             )
 
         return RepositoryIndexProgress(
@@ -171,7 +177,9 @@ class RepositoryIngestionService:
                 check=False,
             )
             if result.returncode != 0:
-                # If branch failed, try default branch without --branch flag
+                # If branch clone failed, clean directory and try default branch without --branch flag
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir, ignore_errors=True)
                 fallback_cmd = ["git", "clone", "--depth", "1", clone_target_url, str(dest_dir)]
                 fallback_res = subprocess.run(
                     fallback_cmd,
@@ -189,6 +197,21 @@ class RepositoryIngestionService:
 
         return dest_dir
 
+    def _create_session(self):
+        """Create a dedicated Session instance for background task processing."""
+        if self.session_factory is None:
+            return None
+        try:
+            res = self.session_factory
+            if callable(res):
+                res = res()
+            if callable(res) and not hasattr(res, "query"):
+                res = res()
+            return res
+        except Exception as e:
+            logger.warning("session_creation_failed_in_ingestion", error=str(e))
+            return None
+
     def ingest_repository(
         self,
         repo_id: str,
@@ -199,19 +222,31 @@ class RepositoryIngestionService:
         Execute full synchronous / background ingestion of a repository:
         Clones -> Scans -> Chunks -> Embeds -> Upserts -> Updates DB.
         """
+        start_time = time.perf_counter()
+        session = self._create_session()
+        if session is not None:
+            repo_repo = RepositoryRepository(session)
+            idx_mgr = IndexManager(self.index_manager.embedding_service, self.index_manager.vector_db, session)
+        else:
+            repo_repo = self.repo_repository
+            idx_mgr = self.index_manager
+
         self._update_progress(repo_id, status="indexing", stage="cloning", progress=5.0)
 
-        db_repo = self.repo_repository.get_by_id(repo_id)
+        db_repo = repo_repo.get_by_id(repo_id)
         if not db_repo:
-            self._update_progress(repo_id, status="failed", stage="failed", progress=0.0, error="Repository not found in DB")
+            err = "Repository not found in DB"
+            self._update_progress(repo_id, status="failed", stage="failed", progress=0.0, error=err)
+            if session:
+                session.close()
             return 0
 
         # Update DB status to INDEXING
-        self.repo_repository.set_indexing_status(repo_id, status=IndexingStatus.INDEXING.value, chunks_count=0)
+        repo_repo.set_indexing_status(repo_id, status=IndexingStatus.INDEXING.value, chunks_count=0)
 
         try:
             # Stage 1: Clone / Prepare repository
-            logger.info("Ingestion starting for repository", repo_id=repo_id, url=db_repo.url)
+            logger.info("repository_ingestion_start", repo_id=repo_id, url=db_repo.url, branch=db_repo.default_branch or "main")
             repo_path = self._clone_or_prepare_repo(
                 repo_id=repo_id,
                 url=db_repo.url,
@@ -296,38 +331,70 @@ class RepositoryIngestionService:
                     chunks_created=total_c,
                 )
 
-            total_indexed = self.index_manager.index_full_repository(
+            total_indexed = idx_mgr.index_full_repository(
                 repo_id=repo_id,
                 commit_hash=commit_hash,
                 chunks=all_chunks,
                 progress_callback=on_progress,
             )
 
-            # Stage 5: Mark Completed in PostgreSQL
-            self.repo_repository.set_indexing_status(
-                repo_id=repo_id,
-                status=IndexingStatus.INDEXED.value,
-                chunks_count=total_indexed,
-            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            # Stage 5: Mark Completed in PostgreSQL (valid only if vectors exist)
+            final_status = IndexingStatus.INDEXED.value if total_indexed > 0 else IndexingStatus.FAILED.value
+            final_error = None if total_indexed > 0 else "Repository indexing produced 0 chunks"
+
+            if final_status == IndexingStatus.INDEXED.value:
+                repo_repo.set_indexing_status(
+                    repo_id=repo_id,
+                    status=final_status,
+                    chunks_count=total_indexed,
+                )
+            else:
+                repo_repo.set_indexing_status(
+                    repo_id=repo_id,
+                    status=final_status,
+                    chunks_count=0,
+                    error=final_error,
+                )
 
             self._update_progress(
                 repo_id,
-                status="indexed",
-                stage="completed",
-                progress=100.0,
+                status=final_status,
+                stage="completed" if total_indexed > 0 else "failed",
+                progress=100.0 if total_indexed > 0 else 0.0,
                 files_processed=total_files,
                 chunks_created=total_indexed,
+                error=final_error,
             )
-            logger.info("Ingestion completed successfully", repo_id=repo_id, chunks=total_indexed)
+            logger.info(
+                "repository_ingestion_success",
+                repository_id=repo_id,
+                stage="completed",
+                duration_ms=duration_ms,
+                files_discovered=total_files,
+                chunks_created=total_indexed,
+                embeddings_created=total_indexed,
+                qdrant_points_written=total_indexed,
+                final_status=final_status,
+            )
             return total_indexed
 
         except Exception as exc:
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             err_msg = str(exc)
-            logger.error("Repository ingestion failed", repo_id=repo_id, error=err_msg)
-            self.repo_repository.set_indexing_status(
+            logger.error(
+                "repository_ingestion_failed",
+                repository_id=repo_id,
+                stage="failed",
+                duration_ms=duration_ms,
+                final_status=IndexingStatus.FAILED.value,
+                safe_error_message=err_msg[:300],
+            )
+            repo_repo.set_indexing_status(
                 repo_id=repo_id,
                 status=IndexingStatus.FAILED.value,
                 chunks_count=0,
+                error=err_msg,
             )
             self._update_progress(
                 repo_id,
@@ -337,3 +404,6 @@ class RepositoryIngestionService:
                 error=err_msg,
             )
             return 0
+        finally:
+            if session is not None:
+                session.close()

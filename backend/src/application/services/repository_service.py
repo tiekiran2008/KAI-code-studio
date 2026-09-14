@@ -1,9 +1,13 @@
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Optional, Any
 import time
 
+from src.core.config import settings
 from src.domain.entities.repository import (
     Repository,
+    RepositoryProvider,
     RepositoryCreate,
     RepositoryUpdate,
     RepositoryHealthCheck,
@@ -11,10 +15,15 @@ from src.domain.entities.repository import (
     LanguageStat,
     DetectedStack,
     IndexingStatus,
+    FileNode,
+    FileContentResponse,
 )
 from src.infrastructure.repositories.repository_repository import RepositoryRepository
 from src.infrastructure.analysis.stack_detector import StackDetector
+from src.infrastructure.filesystem.path_sandbox import PathSandboxService
+from src.infrastructure.filesystem.file_filter import FileFilter
 from src.domain.interfaces.vector_db import IVectorDB
+
 
 
 class RepositoryService:
@@ -34,12 +43,24 @@ class RepositoryService:
         lang_stats = [LanguageStat(**stat) for stat in (db_repo.language_stats_json or [])]
         stack = DetectedStack(**db_repo.detected_stack_json) if db_repo.detected_stack_json else None
 
+        raw_provider = getattr(db_repo, "provider", None)
+        if raw_provider:
+            if isinstance(raw_provider, RepositoryProvider):
+                provider = raw_provider
+            else:
+                try:
+                    provider = RepositoryProvider(str(raw_provider).lower())
+                except ValueError:
+                    provider = self.detector.detect_provider(db_repo.url) if getattr(db_repo, "url", None) else RepositoryProvider.GITHUB
+        else:
+            provider = self.detector.detect_provider(db_repo.url) if getattr(db_repo, "url", None) else RepositoryProvider.GITHUB
+
         return Repository(
             id=db_repo.id,
             user_id=db_repo.user_id,
             workspace_id=db_repo.workspace_id,
             url=db_repo.url,
-            provider=db_repo.provider,
+            provider=provider,
             name=db_repo.name,
             description=db_repo.description,
             owner=db_repo.owner,
@@ -176,3 +197,121 @@ class RepositoryService:
             latency_ms=latency,
             checked_at=datetime.now(timezone.utc),
         )
+
+    def _get_repo_dir(self, repo_id: str, db_repo: Any) -> Path:
+        """Resolve repository workspace root path on disk."""
+        url = getattr(db_repo, "url", "") or ""
+        if url.startswith("local://") or (url and os.path.isdir(url)):
+            local_path = Path(url.replace("local://", "")).resolve()
+            if local_path.exists() and local_path.is_dir():
+                return local_path
+
+        base_dir = Path(settings.WORKSPACE_ROOT).resolve()
+        return (base_dir / "repos" / repo_id).resolve()
+
+    def get_file_tree(self, user_id: str, repo_id: str) -> List[FileNode]:
+        """Fetch sanitized hierarchical file tree for repository."""
+        db_repo = self.repo_repository.get_by_id(repo_id)
+        if not db_repo:
+            raise ValueError("Repository not found")
+        if db_repo.user_id != user_id:
+            raise PermissionError("Unauthorized access to repository")
+
+        repo_dir = self._get_repo_dir(repo_id, db_repo)
+        if not repo_dir.exists() or not repo_dir.is_dir():
+            return []
+
+        def build_tree(current_dir: Path, rel_base: str = "") -> List[FileNode]:
+            nodes: List[FileNode] = []
+            try:
+                entries = sorted(
+                    os.scandir(current_dir),
+                    key=lambda e: (not e.is_dir(), e.name.lower()),
+                )
+            except Exception:
+                return nodes
+
+            for entry in entries:
+                rel_path = f"{rel_base}/{entry.name}".lstrip("/")
+                if entry.is_dir(follow_symlinks=False):
+                    if FileFilter.should_ignore_dir(entry.name):
+                        continue
+                    children = build_tree(Path(entry.path), rel_path)
+                    nodes.append(
+                        FileNode(
+                            id=f"dir-{repo_id}-{rel_path}",
+                            name=entry.name,
+                            path=rel_path,
+                            type="directory",
+                            children=children,
+                        )
+                    )
+                elif entry.is_file(follow_symlinks=False):
+                    try:
+                        size = entry.stat().st_size
+                    except Exception:
+                        size = 0
+                    is_valid, _ = FileFilter.is_valid_file(rel_path, size)
+                    if not is_valid:
+                        continue
+                    lang = FileFilter.detect_language(rel_path)
+                    nodes.append(
+                        FileNode(
+                            id=f"file-{repo_id}-{rel_path}",
+                            name=entry.name,
+                            path=rel_path,
+                            type="file",
+                            size=size,
+                            language=lang,
+                        )
+                    )
+            return nodes
+
+        return build_tree(repo_dir)
+
+    def get_file_content(self, user_id: str, repo_id: str, relative_path: str) -> FileContentResponse:
+        """Fetch safe, sandboxed file content for a file in the repository."""
+        db_repo = self.repo_repository.get_by_id(repo_id)
+        if not db_repo:
+            raise ValueError("Repository not found")
+        if db_repo.user_id != user_id:
+            raise PermissionError("Unauthorized access to repository")
+
+        repo_dir = self._get_repo_dir(repo_id, db_repo)
+        if not repo_dir.exists() or not repo_dir.is_dir():
+            raise FileNotFoundError("Repository directory not found on disk")
+
+        # Strip leading slashes from requested path
+        clean_rel = relative_path.lstrip("/\\")
+        if not clean_rel:
+            raise ValueError("File path cannot be empty")
+
+        safe_path = PathSandboxService.validate_path(repo_dir, clean_rel, must_be_file=True)
+        if not safe_path.exists() or not safe_path.is_file():
+            raise FileNotFoundError(f"File not found: {clean_rel}")
+
+        size = safe_path.stat().st_size
+        if size > 2 * 1024 * 1024:
+            raise ValueError(f"File size ({size} bytes) exceeds maximum viewing limit of 2MB")
+
+        is_valid, reason = FileFilter.is_valid_file(clean_rel, size)
+        if not is_valid and reason and "Sensitive" in reason:
+            raise PermissionError(f"Access to sensitive file is forbidden: {reason}")
+
+        try:
+            content = safe_path.read_text(encoding="utf-8")
+            is_binary = False
+        except UnicodeDecodeError:
+            content = "[Binary file cannot be displayed as text]"
+            is_binary = True
+
+        lang = FileFilter.detect_language(clean_rel)
+        return FileContentResponse(
+            path=clean_rel.replace("\\", "/"),
+            name=safe_path.name,
+            content=content,
+            size=size,
+            language=lang,
+            is_binary=is_binary,
+        )
+

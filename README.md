@@ -171,7 +171,7 @@ User Query ──> Hybrid Retrieval ──> 6-Signal Re-Ranker ──> Vector In
 ### 1. Environment Setup
 ```bash
 # Clone repository
-git clone https://github.com/your-username/kai-code-studio.git
+git clone https://github.com/tiekiran2008/KAI-code-studio.git
 cd kai-code-studio
 
 # Copy environment configurations

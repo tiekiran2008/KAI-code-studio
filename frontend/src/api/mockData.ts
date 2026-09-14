@@ -241,7 +241,7 @@ export const MOCK_ANALYTICS: AnalyticsMetrics = {
   totalTokensUsed: 184500,
   agentExecutionsCount: 428,
   toolInvocationsCount: 152,
-  memoryHitRate: 91.4,
+  memoryHitRate: 0.914,
   activeSessionsCount: 14,
   averageConfidence: 0.94
 };

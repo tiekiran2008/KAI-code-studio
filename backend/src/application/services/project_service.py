@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 from src.domain.entities.project import Project, ProjectCreate, ProjectUpdate, ProjectDashboard, ProjectStatus
 from src.infrastructure.repositories.project_repository import ProjectRepository
 from src.application.services.repository_service import RepositoryService
@@ -10,17 +11,24 @@ class ProjectService:
         self.repo_service = repo_service
 
     def _to_entity(self, db_project, user_id: str) -> Project:
-        repos = [self.repo_service._to_entity(r) for r in (db_project.repositories or [])]
+        repos = [self.repo_service._to_entity(r) for r in (getattr(db_project, "repositories", None) or [])]
+        raw_status = getattr(db_project, "status", None)
+        try:
+            status = ProjectStatus(str(raw_status).lower()) if raw_status else ProjectStatus.ACTIVE
+        except ValueError:
+            status = ProjectStatus.ACTIVE
+        created_at = getattr(db_project, "created_at", None) or datetime.utcnow()
+        updated_at = getattr(db_project, "updated_at", None) or created_at
         return Project(
-            id=db_project.id,
-            user_id=db_project.user_id,
-            workspace_id=db_project.workspace_id,
-            name=db_project.name,
-            description=db_project.description,
-            status=ProjectStatus(db_project.status or "active"),
+            id=str(db_project.id),
+            user_id=str(getattr(db_project, "user_id", user_id)),
+            workspace_id=getattr(db_project, "workspace_id", None),
+            name=getattr(db_project, "name", "Untitled Project") or "Untitled Project",
+            description=getattr(db_project, "description", None),
+            status=status,
             repositories=repos,
-            created_at=db_project.created_at,
-            updated_at=db_project.updated_at,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
     def create_project(self, user_id: str, data: ProjectCreate) -> Project:

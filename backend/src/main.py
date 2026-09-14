@@ -33,9 +33,20 @@ from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.core.config import settings
-from src.core.errors import APIError, api_error_handler, global_exception_handler
+from src.core.errors import (
+    APIError,
+    LLMQuotaExceededError,
+    api_error_handler,
+    global_exception_handler,
+    llm_quota_exception_handler,
+)
 from src.core.logger import logger, setup_logging
 from src.interfaces.api.v1.router import api_router
+from src.interfaces.api.dependencies import (
+    _get_embedding_service,
+    _get_vector_db,
+    _get_llm_provider,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -109,14 +120,21 @@ async def http_exception_handler(
 # ---------------------------------------------------------------------------
 
 def _init_postgres() -> None:
-    """Auto-provision all SQLAlchemy-declared tables (idempotent)."""
+    """Auto-provision all SQLAlchemy-declared tables, sync schema drift, and repair legacy data (idempotent)."""
     from sqlalchemy import create_engine
     from src.infrastructure.persistence.models import Base  # noqa: F401 — side-effect import registers all models
+    from src.infrastructure.persistence.schema_migrator import sync_schema
 
     engine = create_engine(settings.POSTGRES_URL, pool_pre_ping=True)
-    Base.metadata.create_all(bind=engine)
-    engine.dispose()
-    logger.info("postgres_init_ok", message="All database tables verified / created")
+    try:
+        added_columns = sync_schema(engine)
+        if added_columns:
+            logger.info("postgres_schema_synced", added_columns=added_columns)
+    except Exception as exc:
+        logger.warning("postgres_schema_sync_warning", error=str(exc))
+    finally:
+        engine.dispose()
+    logger.info("postgres_init_ok", message="All database tables verified / synchronized")
 
 
 def _init_redis() -> None:
@@ -177,7 +195,7 @@ def _build_memory_manager() -> Any:
     redis_client = redis_lib_inner.from_url(settings.REDIS_URL, decode_responses=False)
     session_cache = RedisSessionCache(redis_client)
 
-    embedding_service = SentenceTransformerService()
+    embedding_service = _get_embedding_service()
 
     manager = MemoryManager(
         repository=repo,
@@ -234,11 +252,6 @@ def _build_langgraph_supervisor(app_state: Any) -> Any:
     compilation cost. Stores the compiled graph on ``app.state.agent_graph``
     and populates ``app.state.tool_registry``.
     """
-    from src.infrastructure.llm.llm_factory import create_llm_provider
-    from src.infrastructure.embeddings.sentence_transformer_service import (
-        SentenceTransformerService,
-    )
-    from src.infrastructure.vector_db.qdrant_adapter import QdrantAdapter
     import redis as redis_lib_inner
     from src.application.rag.query_processor import QueryProcessor
     from src.application.services.memory_service import MemoryService
@@ -246,9 +259,9 @@ def _build_langgraph_supervisor(app_state: Any) -> Any:
     from src.infrastructure.tools.manager import ToolManager
     from src.infrastructure.observability.tool_metrics import ToolMetrics
 
-    llm_provider = create_llm_provider()
-    embedding_service = SentenceTransformerService()
-    vector_db = QdrantAdapter(url=settings.QDRANT_URL)
+    llm_provider = _get_llm_provider()
+    embedding_service = _get_embedding_service()
+    vector_db = _get_vector_db()
     redis_client = redis_lib_inner.from_url(settings.REDIS_URL, decode_responses=False)
 
     query_processor = QueryProcessor(
@@ -404,10 +417,16 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Middleware (applied in reverse LIFO order — last registered runs first)
+# Middleware (applied in reverse LIFO order — last registered runs first / outermost)
 # ---------------------------------------------------------------------------
 
-# 1. CORS — must be registered before all other middleware
+# 1. Process time — injects latency header for client-side observability
+app.add_middleware(ProcessTimeMiddleware)
+
+# 2. Request ID — stamped on every inbound request and echoed in response
+app.add_middleware(RequestIDMiddleware)
+
+# 3. CORS — registered last so it is outermost and guarantees CORS headers on all responses (including errors)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -417,18 +436,13 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-Process-Time-Ms"],
 )
 
-# 2. Request ID — stamped on every inbound request and echoed in response
-app.add_middleware(RequestIDMiddleware)
-
-# 3. Process time — injects latency header for client-side observability
-app.add_middleware(ProcessTimeMiddleware)
-
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
 
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(LLMQuotaExceededError, llm_quota_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(APIError, api_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(Exception, global_exception_handler)
 

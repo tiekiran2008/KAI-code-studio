@@ -72,12 +72,11 @@ const AGENT_DATA: Record<string, AgentMetrics> = {
     status: 'online',
     duration: 210,
     confidence: 0.94,
-    errorsCount: 1,
+    errorsCount: 0,
     timeline: [
       { step: 'AST dependency graph check', latency: 90, status: 'ok', timestamp: '12:45:04' },
-      { step: 'OWASP vulnerability scanning', latency: 120, status: 'error', timestamp: '12:45:04' },
+      { step: 'OWASP vulnerability scanning', latency: 120, status: 'ok', timestamp: '12:45:04' },
     ],
-    errorLog: ['Warn: Null pointer potential on line 142 of supervisor.py'],
   },
   memory: {
     id: 'memory',

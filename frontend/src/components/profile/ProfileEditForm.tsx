@@ -50,14 +50,40 @@ export const ProfileEditForm: React.FC<ProfileEditFormProps> = ({ initialData, o
     }));
   };
 
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAvatarPreview(initialData.avatar);
+    setFormData({
+      name: initialData.name || '',
+      bio: initialData.bio || '',
+      timezone: initialData.timezone || 'UTC',
+      theme_preference: initialData.theme_preference || 'system',
+      preferred_llm_provider: initialData.preferred_llm_provider || 'openai',
+      default_ai_model: initialData.default_ai_model || 'gpt-4o',
+      notification_preferences: {
+        email: initialData.notification_preferences?.email ?? true,
+        in_app: initialData.notification_preferences?.in_app ?? true,
+      }
+    });
+  }, [initialData]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    setFileError(null);
     if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setFileError('File size exceeds 2MB limit. Please choose a smaller image.');
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
         setAvatarPreview(base64String);
         setFormData(prev => ({ ...prev, avatar: base64String }));
+      };
+      reader.onerror = () => {
+        setFileError('Failed to read image file.');
       };
       reader.readAsDataURL(file);
     }
@@ -94,9 +120,9 @@ export const ProfileEditForm: React.FC<ProfileEditFormProps> = ({ initialData, o
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-8 max-w-3xl">
-      {error && (
+      {(error || fileError) && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
-          {error}
+          {fileError || error}
         </div>
       )}
 
@@ -198,6 +224,7 @@ export const ProfileEditForm: React.FC<ProfileEditFormProps> = ({ initialData, o
             <option value="system">System Default</option>
             <option value="dark">Dark Mode</option>
             <option value="light">Light Mode</option>
+            <option value="ambient">Ambient Focus (Signature)</option>
           </select>
         </div>
 

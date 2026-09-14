@@ -1,6 +1,24 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect } from 'react';
+import { useThemeStore, Theme, AmbientIntensity, FocusArea } from '../../store/useThemeStore';
 
-type Theme = 'dark' | 'light' | 'system';
+export type { Theme, AmbientIntensity, FocusArea };
+
+interface ThemeContextValue {
+  theme: Theme;
+  resolvedTheme: 'dark' | 'light' | 'ambient';
+  ambientIntensity: AmbientIntensity;
+  reduceMotion: boolean;
+  focusSession: boolean;
+  activeFocusArea: FocusArea;
+  setTheme: (theme: Theme) => void;
+  setAmbientIntensity: (intensity: AmbientIntensity) => void;
+  setReduceMotion: (reduce: boolean) => void;
+  setFocusSession: (active: boolean) => void;
+  setActiveFocusArea: (area: FocusArea) => void;
+  toggleTheme: () => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -8,69 +26,55 @@ interface ThemeProviderProps {
   storageKey?: string;
 }
 
-interface ThemeProviderState {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-}
-
-const initialState: ThemeProviderState = {
-  theme: 'dark',
-  setTheme: () => null,
-};
-
-const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
-
-export function ThemeProvider({
-  children,
-  defaultTheme = 'dark',
-  storageKey = 'vite-ui-theme',
-  ...props
-}: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
-  );
+export function ThemeProvider({ children }: ThemeProviderProps) {
+  const themeState = useThemeStore();
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove('light', 'dark', 'light-mode');
-
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-        .matches
-        ? 'dark'
-        : 'light';
-      root.classList.add(systemTheme);
-      // For compatibility with the existing CSS that uses .light-mode
-      if (systemTheme === 'light') {
-         root.classList.add('light-mode');
-      }
-      return;
+    // Listen to system preference changes if system theme is selected
+    if (themeState.theme === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleChange = () => {
+        themeState.setTheme('system');
+      };
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
     }
+  }, [themeState.theme]);
 
-    root.classList.add(theme);
-    if (theme === 'light') {
-      root.classList.add('light-mode');
+  const toggleTheme = () => {
+    if (themeState.theme === 'dark') {
+      themeState.setTheme('ambient');
+    } else if (themeState.theme === 'ambient') {
+      themeState.setTheme('light');
+    } else {
+      themeState.setTheme('dark');
     }
-  }, [theme]);
+  };
 
-  const value = {
-    theme,
-    setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
-    },
+  const value: ThemeContextValue = {
+    ...themeState,
+    toggleTheme,
   };
 
   return (
-    <ThemeProviderContext.Provider {...props} value={value}>
+    <ThemeContext.Provider value={value}>
       {children}
-    </ThemeProviderContext.Provider>
+    </ThemeContext.Provider>
   );
 }
 
 export const useTheme = () => {
-  const context = useContext(ThemeProviderContext);
-  if (context === undefined)
-    throw new Error('useTheme must be used within a ThemeProvider');
+  const context = useContext(ThemeContext);
+  if (!context) {
+    // Fallback to store if used outside provider
+    const state = useThemeStore.getState();
+    return {
+      ...state,
+      toggleTheme: () => {
+        const next = state.theme === 'dark' ? 'ambient' : state.theme === 'ambient' ? 'light' : 'dark';
+        state.setTheme(next);
+      }
+    };
+  }
   return context;
 };

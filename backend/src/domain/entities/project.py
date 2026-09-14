@@ -5,8 +5,8 @@ Pydantic models for Projects (logical groupings of multiple repositories).
 """
 from __future__ import annotations
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Optional, List, Any
 from datetime import datetime
 
 from src.domain.entities.repository import Repository
@@ -38,8 +38,34 @@ class Project(BaseModel):
     description: Optional[str] = None
     status: ProjectStatus = ProjectStatus.ACTIVE
     repositories: List[Repository] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def validate_status(cls, v: Any) -> ProjectStatus:
+        if isinstance(v, ProjectStatus):
+            return v
+        if not v:
+            return ProjectStatus.ACTIVE
+        normalized = str(v).strip().lower()
+        if normalized == "archived":
+            return ProjectStatus.ARCHIVED
+        return ProjectStatus.ACTIVE
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def validate_created_at(cls, v: Any) -> datetime:
+        if v is None:
+            return datetime.utcnow()
+        return v
+
+    @field_validator("updated_at", mode="before")
+    @classmethod
+    def validate_updated_at(cls, v: Any) -> datetime:
+        if v is None:
+            return datetime.utcnow()
+        return v
 
     model_config = ConfigDict(from_attributes=True)
 

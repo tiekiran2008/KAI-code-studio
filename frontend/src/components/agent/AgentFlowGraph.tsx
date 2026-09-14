@@ -88,7 +88,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({
           status: 'online',
           duration: 210,
           confidence: 0.94,
-          errors: 1,
+          errors: 0,
           isSelected: selectedAgentId === 'reviewer',
         },
       },

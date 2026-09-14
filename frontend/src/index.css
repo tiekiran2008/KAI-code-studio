@@ -4,13 +4,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   THEME DESIGN TOKENS & CSS VARIABLES
+   ========================================================================== */
+:root {
+  --theme-bg: #090d16;
+  --theme-surface: rgba(15, 23, 42, 0.75);
+  --theme-card: rgba(30, 41, 59, 0.5);
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-text-primary: #f8fafc;
+  --theme-text-secondary: #94a3b8;
+  --theme-text-muted: #64748b;
+  --theme-accent: #6366f1;
+}
+
+/* Base Body Styling */
 @layer base {
   body {
     @apply bg-[#090d16] text-slate-100 font-sans antialiased overflow-x-hidden selection:bg-indigo-500/30 selection:text-indigo-200;
   }
 }
 
-/* Glassmorphism utility classes */
+/* ==========================================================================
+   DEFAULT DARK GLASS THEME
+   ========================================================================== */
 .glass-panel {
   background: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(16px);
@@ -22,7 +39,7 @@
   background: rgba(30, 41, 59, 0.5);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: all 0.2s ease-in-out;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-card:hover {
@@ -42,7 +59,911 @@
   border-color: rgba(99, 102, 241, 0.4);
 }
 
-/* Custom Scrollbar */
+/* ==========================================================================
+   LIGHT MODE STYLING — COMPLETE GLOBAL LIGHT THEME
+   ========================================================================== */
+html.light,
+html.light-mode {
+  --theme-bg: #f8fafc;
+  --theme-surface: #ffffff;
+  --theme-card: #ffffff;
+  --theme-border: #e2e8f0;
+  --theme-text-primary: #0f172a;       /* Primary Headings / Strong Titles / Active High-Emphasis */
+  --theme-text-body: #334155;          /* Normal / Body Text / Form Labels / Table Content */
+  --theme-text-secondary: #475569;     /* Secondary Text / Descriptions / Subtitles / Meta */
+  --theme-text-muted: #64748b;         /* Muted / Helper / Metadata / Timestamps / Placeholders */
+  --theme-text-subtle: #94a3b8;        /* Disabled / Inactive states */
+  --theme-accent: #4f46e5;
+  color-scheme: light;
+}
+
+/* Page & Layout Backgrounds */
+html.light body,
+html.light-mode body,
+html.light .app-layout-container,
+html.light-mode .app-layout-container,
+html.light main,
+html.light-mode main {
+  background-color: #f8fafc !important;
+  color: #334155 !important;
+}
+
+/* Panels & Cards */
+html.light .glass-panel,
+html.light-mode .glass-panel {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+}
+
+html.light .glass-card,
+html.light-mode .glass-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light .glass-card:hover,
+html.light-mode .glass-card:hover {
+  background: #ffffff !important;
+  border-color: rgba(99, 102, 241, 0.45) !important;
+  box-shadow: 0 6px 20px -4px rgba(99, 102, 241, 0.12) !important;
+}
+
+html.light .glass-button,
+html.light-mode .glass-button {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #1e293b !important;
+}
+
+html.light .glass-button:hover,
+html.light-mode .glass-button:hover {
+  background: #e2e8f0 !important;
+  border-color: rgba(99, 102, 241, 0.5) !important;
+  color: #0f172a !important;
+}
+
+/* Header & Navigation */
+html.light header,
+html.light-mode header {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  backdrop-filter: blur(16px) !important;
+}
+
+html.light aside,
+html.light-mode aside {
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Form Controls & Inputs (Excludes Monaco Editor & Terminal) */
+html.light input:not([type="checkbox"]):not([type="radio"]),
+html.light select,
+html.light textarea,
+html.light-mode input:not([type="checkbox"]):not([type="radio"]),
+html.light-mode select,
+html.light-mode textarea {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html.light input:not([type="checkbox"]):not([type="radio"]):focus,
+html.light select:focus,
+html.light textarea:focus,
+html.light-mode input:not([type="checkbox"]):not([type="radio"]):focus,
+html.light-mode select:focus,
+html.light-mode textarea:focus {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+  color: #0f172a !important;
+}
+
+html.light input:disabled,
+html.light select:disabled,
+html.light textarea:disabled,
+html.light-mode input:disabled,
+html.light-mode select:disabled,
+html.light-mode textarea:disabled {
+  background-color: #f1f5f9 !important;
+  color: #94a3b8 !important;
+  border-color: #e2e8f0 !important;
+  cursor: not-allowed;
+}
+
+/* Placeholders — Readable Gray #64748B */
+html.light input::placeholder,
+html.light textarea::placeholder,
+html.light select::placeholder,
+html.light-mode input::placeholder,
+html.light-mode textarea::placeholder,
+html.light-mode select::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+html.light .placeholder-slate-400::placeholder,
+html.light .placeholder-slate-500::placeholder,
+html.light .placeholder-gray-400::placeholder,
+html.light-mode .placeholder-slate-400::placeholder,
+html.light-mode .placeholder-slate-500::placeholder,
+html.light-mode .placeholder-gray-400::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+/* Dropdown Menus, Dialogs & Modals */
+html.light #user-dropdown-menu,
+html.light #theme-dropdown-menu,
+html.light [role="dialog"],
+html.light .modal-container,
+html.light-mode #user-dropdown-menu,
+html.light-mode #theme-dropdown-menu,
+html.light-mode [role="dialog"],
+html.light-mode .modal-container {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+  color: #334155 !important;
+}
+
+/* ==========================================================================
+   CENTRALIZED LIGHT MODE TYPOGRAPHY HIERARCHY
+   ========================================================================== */
+
+/* Primary Headings: Very Dark Navy/Slate (#0F172A) */
+html.light h1,
+html.light h2,
+html.light h3,
+html.light h4,
+html.light h5,
+html.light h6,
+html.light-mode h1,
+html.light-mode h2,
+html.light-mode h3,
+html.light-mode h4,
+html.light-mode h5,
+html.light-mode h6 {
+  color: #0f172a !important;
+}
+
+/* Form Labels: Dark Slate (#334155) */
+html.light label,
+html.light-mode label,
+html.light .form-label,
+html.light-mode .form-label {
+  color: #334155 !important;
+}
+
+/* Paragraphs / Body Text: Medium-Dark Slate (#475569) */
+html.light p,
+html.light-mode p {
+  color: #475569;
+}
+
+/* Primary text & high emphasis classes: #0F172A */
+html.light .text-white,
+html.light .text-slate-100,
+html.light .text-gray-100,
+html.light .text-zinc-100,
+html.light-mode .text-white,
+html.light-mode .text-slate-100,
+html.light-mode .text-gray-100,
+html.light-mode .text-zinc-100 {
+  color: #0f172a !important;
+}
+
+/* Sub-headings, key card values, strong chips: #1E293B */
+html.light .text-slate-200,
+html.light .text-gray-200,
+html.light .text-zinc-200,
+html.light-mode .text-slate-200,
+html.light-mode .text-gray-200,
+html.light-mode .text-zinc-200 {
+  color: #1e293b !important;
+}
+
+/* Normal / Body Text / Strong labels / Table cells / Sub-items: #334155 */
+html.light .text-slate-300,
+html.light .text-gray-300,
+html.light .text-zinc-300,
+html.light-mode .text-slate-300,
+html.light-mode .text-gray-300,
+html.light-mode .text-zinc-300 {
+  color: #334155 !important;
+}
+
+/* Secondary Text / Descriptions / Subtitles / Repository info / Help text: #475569 */
+html.light .text-slate-400,
+html.light .text-gray-400,
+html.light .text-zinc-400,
+html.light-mode .text-slate-400,
+html.light-mode .text-gray-400,
+html.light-mode .text-zinc-400 {
+  color: #475569 !important;
+}
+
+/* Muted / Helper / Metadata / Timestamps / Empty-state text: #64748B */
+html.light .text-slate-500,
+html.light .text-gray-500,
+html.light .text-zinc-500,
+html.light-mode .text-slate-500,
+html.light-mode .text-gray-500,
+html.light-mode .text-zinc-500 {
+  color: #64748b !important;
+}
+
+/* Explicit secondary / darker slate classes: #475569 */
+html.light .text-slate-600,
+html.light .text-gray-600,
+html.light .text-zinc-600,
+html.light-mode .text-slate-600,
+html.light-mode .text-gray-600,
+html.light-mode .text-zinc-600 {
+  color: #475569 !important;
+}
+
+html.light .text-slate-700,
+html.light .text-gray-700,
+html.light-mode .text-slate-700,
+html.light-mode .text-gray-700 {
+  color: #334155 !important;
+}
+
+/* Opacity-Based Text Classes Remapping (Ensuring high contrast in Light Mode) */
+html.light .text-white\/90,
+html.light .text-white\/80,
+html.light .text-white\/70,
+html.light .text-slate-100\/90,
+html.light .text-slate-100\/80,
+html.light-mode .text-white\/90,
+html.light-mode .text-white\/80,
+html.light-mode .text-white\/70,
+html.light-mode .text-slate-100\/90,
+html.light-mode .text-slate-100\/80 {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-200\/90,
+html.light .text-slate-200\/80,
+html.light .text-slate-200\/70,
+html.light .text-slate-200\/60,
+html.light-mode .text-slate-200\/90,
+html.light-mode .text-slate-200\/80,
+html.light-mode .text-slate-200\/70,
+html.light-mode .text-slate-200\/60 {
+  color: #1e293b !important;
+}
+
+html.light .text-slate-300\/90,
+html.light .text-slate-300\/80,
+html.light .text-slate-300\/70,
+html.light .text-slate-300\/60,
+html.light-mode .text-slate-300\/90,
+html.light-mode .text-slate-300\/80,
+html.light-mode .text-slate-300\/70,
+html.light-mode .text-slate-300\/60 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-400\/90,
+html.light .text-slate-400\/80,
+html.light .text-slate-400\/70,
+html.light .text-slate-400\/60,
+html.light-mode .text-slate-400\/90,
+html.light-mode .text-slate-400\/80,
+html.light-mode .text-slate-400\/70,
+html.light-mode .text-slate-400\/60 {
+  color: #475569 !important;
+}
+
+html.light .text-slate-500\/90,
+html.light .text-slate-500\/80,
+html.light-mode .text-slate-500\/90,
+html.light-mode .text-slate-500\/80 {
+  color: #64748b !important;
+}
+
+/* Ensure spans and smalls carrying UI label text are readable */
+html.light span,
+html.light small,
+html.light-mode span,
+html.light-mode small {
+  color: inherit;
+}
+
+/* Sidebar navigation items */
+html.light nav a,
+html.light nav button,
+html.light-mode nav a,
+html.light-mode nav button {
+  color: #334155 !important;
+}
+
+html.light nav a:hover,
+html.light nav button:hover,
+html.light-mode nav a:hover,
+html.light-mode nav button:hover {
+  color: #0f172a !important;
+  background-color: #f1f5f9 !important;
+}
+
+/* Active nav items */
+html.light nav .active,
+html.light nav a.active,
+html.light-mode nav .active,
+html.light-mode nav a.active {
+  color: #4338ca !important;
+  background-color: #eef2ff !important;
+  border-color: #c7d2fe !important;
+}
+
+/* Background Utility Remapping in Light Mode */
+html.light .bg-slate-900,
+html.light .bg-slate-950,
+html.light .bg-gray-900,
+html.light .bg-gray-950,
+html.light-mode .bg-slate-900,
+html.light-mode .bg-slate-950,
+html.light-mode .bg-gray-900,
+html.light-mode .bg-gray-950 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-slate-900\/40,
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/95,
+html.light .bg-gray-950\/50,
+html.light-mode .bg-slate-900\/40,
+html.light-mode .bg-slate-900\/50,
+html.light-mode .bg-slate-900\/60,
+html.light-mode .bg-slate-900\/80,
+html.light-mode .bg-slate-900\/95,
+html.light-mode .bg-gray-950\/50 {
+  background-color: #ffffff !important;
+}
+
+html.light .bg-slate-800,
+html.light-mode .bg-slate-800 {
+  background-color: #e2e8f0 !important;
+}
+
+html.light .bg-slate-800\/80,
+html.light .bg-slate-800\/60,
+html.light-mode .bg-slate-800\/80,
+html.light-mode .bg-slate-800\/60 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-\[\#090d16\],
+html.light .bg-\[\#0f172a\],
+html.light .bg-\[\#060813\],
+html.light .bg-\[\#0f141f\],
+html.light .bg-\[\#0b0f19\],
+html.light-mode .bg-\[\#090d16\],
+html.light-mode .bg-\[\#0f172a\],
+html.light-mode .bg-\[\#060813\],
+html.light-mode .bg-\[\#0f141f\],
+html.light-mode .bg-\[\#0b0f19\] {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-\[\#0f172a\]\/60,
+html.light .bg-\[\#0f172a\]\/90,
+html.light .bg-\[\#0f141f\]\/60,
+html.light .bg-\[\#0f141f\]\/80,
+html.light .bg-\[\#0f141f\]\/90,
+html.light-mode .bg-\[\#0f172a\]\/60,
+html.light-mode .bg-\[\#0f172a\]\/90,
+html.light-mode .bg-\[\#0f141f\]\/60,
+html.light-mode .bg-\[\#0f141f\]\/80,
+html.light-mode .bg-\[\#0f141f\]\/90 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* Hover States in Light Mode */
+html.light .hover\:bg-slate-800:hover,
+html.light .hover\:bg-slate-800\/80:hover,
+html.light .hover\:bg-slate-800\/60:hover,
+html.light-mode .hover\:bg-slate-800:hover,
+html.light-mode .hover\:bg-slate-800\/80:hover,
+html.light-mode .hover\:bg-slate-800\/60:hover {
+  background-color: #e2e8f0 !important;
+}
+
+html.light .hover\:text-white:hover,
+html.light-mode .hover\:text-white:hover {
+  color: #0f172a !important;
+}
+
+html.light .hover\:text-slate-100:hover,
+html.light-mode .hover\:text-slate-100:hover {
+  color: #0f172a !important;
+}
+
+html.light .hover\:text-slate-200:hover,
+html.light-mode .hover\:text-slate-200:hover {
+  color: #1e293b !important;
+}
+
+html.light .hover\:text-slate-300:hover,
+html.light-mode .hover\:text-slate-300:hover {
+  color: #0f172a !important;
+}
+
+html.light .hover\:text-slate-400:hover,
+html.light-mode .hover\:text-slate-400:hover {
+  color: #334155 !important;
+}
+
+html.light .group:hover .group-hover\:text-white,
+html.light-mode .group:hover .group-hover\:text-white {
+  color: #0f172a !important;
+}
+
+html.light .group:hover .group-hover\:text-slate-100,
+html.light-mode .group:hover .group-hover\:text-slate-100 {
+  color: #0f172a !important;
+}
+
+html.light .group:hover .group-hover\:text-slate-200,
+html.light-mode .group:hover .group-hover\:text-slate-200 {
+  color: #1e293b !important;
+}
+
+html.light .group:hover .group-hover\:text-slate-300,
+html.light-mode .group:hover .group-hover\:text-slate-300 {
+  color: #0f172a !important;
+}
+
+html.light .hover\:border-slate-700:hover,
+html.light .hover\:border-slate-600:hover,
+html.light-mode .hover\:border-slate-700:hover,
+html.light-mode .hover\:border-slate-600:hover {
+  border-color: #94a3b8 !important;
+}
+
+/* Borders & Dividers in Light Mode */
+html.light .border-slate-800,
+html.light .border-slate-700,
+html.light .border-slate-600,
+html.light .border-slate-800\/80,
+html.light .border-slate-700\/60,
+html.light-mode .border-slate-800,
+html.light-mode .border-slate-700,
+html.light-mode .border-slate-600,
+html.light-mode .border-slate-800\/80,
+html.light-mode .border-slate-700\/60 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Badges, Pills & Contextual Accents in Light Mode */
+html.light .bg-indigo-950\/40,
+html.light .bg-indigo-950\/60,
+html.light .bg-indigo-950\/70,
+html.light .bg-indigo-500\/10,
+html.light .bg-indigo-500\/20,
+html.light-mode .bg-indigo-950\/40,
+html.light-mode .bg-indigo-950\/60,
+html.light-mode .bg-indigo-950\/70,
+html.light-mode .bg-indigo-500\/10,
+html.light-mode .bg-indigo-500\/20 {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+  border-color: #c7d2fe !important;
+}
+
+html.light .text-indigo-400,
+html.light .text-indigo-300,
+html.light .text-indigo-200,
+html.light-mode .text-indigo-400,
+html.light-mode .text-indigo-300,
+html.light-mode .text-indigo-200 {
+  color: #4338ca !important;
+}
+
+html.light .hover\:text-indigo-300:hover,
+html.light-mode .hover\:text-indigo-300:hover {
+  color: #3730a3 !important;
+}
+
+html.light .group:hover .group-hover\:text-indigo-300,
+html.light-mode .group:hover .group-hover\:text-indigo-300 {
+  color: #4338ca !important;
+}
+
+html.light .group:hover .group-hover\:text-indigo-400,
+html.light-mode .group:hover .group-hover\:text-indigo-400 {
+  color: #4338ca !important;
+}
+
+html.light .bg-emerald-500\/10,
+html.light .bg-emerald-500\/20,
+html.light-mode .bg-emerald-500\/10,
+html.light-mode .bg-emerald-500\/20 {
+  background-color: #d1fae5 !important;
+  color: #065f46 !important;
+  border-color: #a7f3d0 !important;
+}
+
+html.light .text-emerald-400,
+html.light .text-emerald-300,
+html.light-mode .text-emerald-400,
+html.light-mode .text-emerald-300 {
+  color: #047857 !important;
+}
+
+html.light .bg-cyan-500\/20,
+html.light .bg-cyan-500\/10,
+html.light-mode .bg-cyan-500\/20,
+html.light-mode .bg-cyan-500\/10 {
+  background-color: #cffafe !important;
+  color: #0e7490 !important;
+  border-color: #a5f3fc !important;
+}
+
+html.light .text-cyan-400,
+html.light .text-cyan-300,
+html.light-mode .text-cyan-400,
+html.light-mode .text-cyan-300 {
+  color: #0891b2 !important;
+}
+
+html.light .bg-purple-500\/10,
+html.light .bg-purple-500\/20,
+html.light-mode .bg-purple-500\/10,
+html.light-mode .bg-purple-500\/20 {
+  background-color: #f3e8ff !important;
+  color: #6b21a8 !important;
+  border-color: #e9d5ff !important;
+}
+
+html.light .text-purple-400,
+html.light .text-purple-300,
+html.light-mode .text-purple-400,
+html.light-mode .text-purple-300 {
+  color: #7e22ce !important;
+}
+
+html.light .bg-rose-500\/10,
+html.light .bg-rose-500\/20,
+html.light-mode .bg-rose-500\/10,
+html.light-mode .bg-rose-500\/20 {
+  background-color: #ffe4e6 !important;
+  color: #9f1239 !important;
+  border-color: #fecdd3 !important;
+}
+
+html.light .text-rose-400,
+html.light .text-rose-300,
+html.light-mode .text-rose-400,
+html.light-mode .text-rose-300 {
+  color: #be123c !important;
+}
+
+html.light .bg-amber-500\/10,
+html.light .bg-amber-500\/20,
+html.light-mode .bg-amber-500\/10,
+html.light-mode .bg-amber-500\/20 {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #fde68a !important;
+}
+
+html.light .text-amber-400,
+html.light .text-amber-300,
+html.light-mode .text-amber-400,
+html.light-mode .text-amber-300 {
+  color: #b45309 !important;
+}
+
+/* Tables in Light Mode */
+html.light table,
+html.light-mode table {
+  color: #334155 !important;
+}
+
+html.light th,
+html.light-mode th {
+  background-color: #f8fafc !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light td,
+html.light-mode td {
+  border-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+html.light tr:hover,
+html.light-mode tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* Timestamps & Metadata in Light Mode */
+html.light time,
+html.light-mode time,
+html.light .text-timestamp,
+html.light-mode .text-timestamp {
+  color: #64748b !important;
+}
+
+/* Keyboard KBD badge in Light Mode */
+html.light kbd,
+html.light-mode kbd {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Code Editor / Monaco / Terminal EXCEPTION (Preserve Editor Theme) */
+html.light .monaco-editor,
+html.light .monaco-editor *,
+html.light [data-mode-id],
+html.light .xterm,
+html.light .xterm *,
+html.light [class*="terminal"],
+html.light-mode .monaco-editor,
+html.light-mode .monaco-editor *,
+html.light-mode [data-mode-id],
+html.light-mode .xterm,
+html.light-mode .xterm *,
+html.light-mode [class*="terminal"] {
+  /* Monaco editor and terminal retain their internal dark colors */
+}
+
+/* ==========================================================================
+   AMBIENT FOCUS — SIGNATURE THEME
+   ========================================================================== */
+html.ambient-theme {
+  --ambient-bg: #060813;
+  --ambient-surface: rgba(10, 15, 30, 0.74);
+  --ambient-card: rgba(15, 22, 42, 0.65);
+  --ambient-border: rgba(99, 102, 241, 0.14);
+  --ambient-border-glow: rgba(99, 102, 241, 0.4);
+  --ambient-primary: #6366f1;
+  --ambient-secondary: #06b6d4;
+  --ambient-violet: #8b5cf6;
+  --ambient-teal: #14b8a6;
+  --ambient-glow-opacity: 0.7;
+  --ambient-blur: 16px;
+  color-scheme: dark;
+}
+
+html.ambient-theme body {
+  background-color: #060813 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Ambient Glass Surfaces */
+html.ambient-theme .glass-panel {
+  background: rgba(10, 15, 30, 0.75) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(99, 102, 241, 0.16) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+html.ambient-theme .glass-card {
+  background: rgba(15, 23, 44, 0.6) !important;
+  backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(99, 102, 241, 0.12) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+html.ambient-theme .glass-card:hover {
+  background: rgba(20, 30, 58, 0.75) !important;
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 8px 28px -6px rgba(99, 102, 241, 0.22), inset 0 1px 0 0 rgba(255, 255, 255, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+html.ambient-theme header {
+  background: rgba(10, 15, 30, 0.7) !important;
+  backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.15) !important;
+}
+
+html.ambient-theme aside {
+  background: rgba(8, 12, 26, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  border-right: 1px solid rgba(99, 102, 241, 0.15) !important;
+}
+
+/* Intensity Modifiers */
+html[data-ambient-intensity="minimal"] {
+  --ambient-glow-opacity: 0.35;
+}
+
+html[data-ambient-intensity="balanced"] {
+  --ambient-glow-opacity: 0.7;
+}
+
+html[data-ambient-intensity="immersive"] {
+  --ambient-glow-opacity: 1.0;
+}
+
+html[data-ambient-intensity="immersive"] .glass-panel {
+  border-color: rgba(99, 102, 241, 0.24) !important;
+  box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ==========================================================================
+   AMBIENT BACKGROUND CANVAS ANIMATIONS (Subconscious, slow movement)
+   ========================================================================== */
+@keyframes ambient-drift-1 {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.55 * var(--ambient-glow-opacity, 0.7));
+  }
+  33% {
+    transform: translate(40px, -30px) scale(1.08);
+    opacity: calc(0.7 * var(--ambient-glow-opacity, 0.7));
+  }
+  66% {
+    transform: translate(-30px, 40px) scale(0.95);
+    opacity: calc(0.5 * var(--ambient-glow-opacity, 0.7));
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.55 * var(--ambient-glow-opacity, 0.7));
+  }
+}
+
+@keyframes ambient-drift-2 {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.5 * var(--ambient-glow-opacity, 0.7));
+  }
+  33% {
+    transform: translate(-45px, 35px) scale(1.1);
+    opacity: calc(0.65 * var(--ambient-glow-opacity, 0.7));
+  }
+  66% {
+    transform: translate(35px, -25px) scale(0.92);
+    opacity: calc(0.45 * var(--ambient-glow-opacity, 0.7));
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.5 * var(--ambient-glow-opacity, 0.7));
+  }
+}
+
+@keyframes ambient-drift-3 {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.45 * var(--ambient-glow-opacity, 0.7));
+  }
+  50% {
+    transform: translate(50px, 30px) scale(1.12);
+    opacity: calc(0.6 * var(--ambient-glow-opacity, 0.7));
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: calc(0.45 * var(--ambient-glow-opacity, 0.7));
+  }
+}
+
+.ambient-orb-1 {
+  animation: ambient-drift-1 32s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.ambient-orb-2 {
+  animation: ambient-drift-2 38s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.ambient-orb-3 {
+  animation: ambient-drift-3 44s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+/* ==========================================================================
+   FOCUS AURA SYSTEM
+   ========================================================================== */
+.focus-aura-container {
+  transition: box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+/* Active Aura contextual glows (only in Ambient Focus) */
+html.ambient-theme .focus-aura-editor.focus-aura-active {
+  border-color: rgba(139, 92, 246, 0.45) !important;
+  box-shadow: 0 0 30px -4px rgba(139, 92, 246, calc(0.25 * var(--ambient-glow-opacity, 0.7))),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+html.ambient-theme .focus-aura-chat.focus-aura-active {
+  border-color: rgba(6, 182, 212, 0.45) !important;
+  box-shadow: 0 0 30px -4px rgba(6, 182, 212, calc(0.25 * var(--ambient-glow-opacity, 0.7))),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+html.ambient-theme .focus-aura-review.focus-aura-active {
+  border-color: rgba(99, 102, 241, 0.45) !important;
+  box-shadow: 0 0 30px -4px rgba(99, 102, 241, calc(0.25 * var(--ambient-glow-opacity, 0.7))),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+html.ambient-theme .focus-aura-agent.focus-aura-active {
+  border-color: rgba(16, 185, 129, 0.45) !important;
+  box-shadow: 0 0 30px -4px rgba(16, 185, 129, calc(0.25 * var(--ambient-glow-opacity, 0.7))),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+html.ambient-theme .focus-aura-explorer.focus-aura-active {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 0 24px -4px rgba(99, 102, 241, calc(0.2 * var(--ambient-glow-opacity, 0.7))) !important;
+}
+
+/* ==========================================================================
+   AI ACTIVITY EFFECT (Breathing Shimmer during Real Generation)
+   ========================================================================== */
+@keyframes ambient-ai-pulse {
+  0%, 100% {
+    border-color: rgba(139, 92, 246, 0.35);
+    box-shadow: 0 0 20px -2px rgba(139, 92, 246, 0.2);
+  }
+  50% {
+    border-color: rgba(6, 182, 212, 0.6);
+    box-shadow: 0 0 35px 2px rgba(6, 182, 212, 0.35);
+  }
+}
+
+html.ambient-theme .ambient-ai-generating {
+  animation: ambient-ai-pulse 3s ease-in-out infinite !important;
+}
+
+/* ==========================================================================
+   FOCUS SESSION MODE
+   ========================================================================== */
+html[data-focus-session="true"] aside {
+  opacity: 0.75;
+  transition: opacity 0.3s ease;
+}
+
+html[data-focus-session="true"] aside:hover {
+  opacity: 1;
+}
+
+html[data-focus-session="true"] .ambient-orb-1,
+html[data-focus-session="true"] .ambient-orb-2,
+html[data-focus-session="true"] .ambient-orb-3 {
+  opacity: calc(0.3 * var(--ambient-glow-opacity, 0.7)) !important;
+  animation-duration: 60s !important;
+}
+
+/* ==========================================================================
+   REDUCE MOTION SUPPORT
+   ========================================================================== */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] .ambient-orb-1,
+html[data-reduce-motion="true"] .ambient-orb-2,
+html[data-reduce-motion="true"] .ambient-orb-3,
+html[data-reduce-motion="true"] .ambient-ai-generating {
+  animation: none !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-orb-1,
+  .ambient-orb-2,
+  .ambient-orb-3,
+  .ambient-ai-generating {
+    animation: none !important;
+  }
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -61,7 +982,17 @@
   background: rgba(99, 102, 241, 0.4);
 }
 
-/* Pulse Glow Animation */
+html.light ::-webkit-scrollbar-track,
+html.light-mode ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+html.light ::-webkit-scrollbar-thumb,
+html.light-mode ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+/* Signature Pulse Glow */
 @keyframes glow-pulse {
   0%, 100% {
     box-shadow: 0 0 15px 0px rgba(99, 102, 241, 0.3);

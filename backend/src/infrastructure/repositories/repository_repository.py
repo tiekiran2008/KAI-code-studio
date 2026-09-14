@@ -95,7 +95,13 @@ class RepositoryRepository:
         self.session.refresh(repo)
         return repo
 
-    def set_indexing_status(self, repo_id: str, status: str, chunks_count: int = 0) -> Optional[DBRepository]:
+    def set_indexing_status(
+        self,
+        repo_id: str,
+        status: str,
+        chunks_count: int = 0,
+        error: Optional[str] = None,
+    ) -> Optional[DBRepository]:
         repo = self.get_by_id(repo_id)
         if not repo:
             return None
@@ -103,6 +109,9 @@ class RepositoryRepository:
         if status == "indexed":
             repo.last_indexed_at = datetime.now(timezone.utc)
             repo.chunks_count = chunks_count
+            repo.indexing_error = None
+        elif status == "failed":
+            repo.indexing_error = error
         repo.updated_at = datetime.now(timezone.utc)
         self.session.commit()
         self.session.refresh(repo)

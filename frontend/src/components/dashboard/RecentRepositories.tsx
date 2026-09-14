@@ -12,8 +12,8 @@ export const RecentRepositories: React.FC<RecentRepositoriesProps> = ({ reposito
   const navigate = useNavigate();
   const { setActiveRepo } = useRepoStore();
 
-  const handleOpenRepo = (repo: Repository) => {
-    setActiveRepo(repo);
+  const handleOpenRepo = async (repo: Repository) => {
+    await setActiveRepo(repo);
     navigate('/workspace');
   };
 
@@ -35,36 +35,43 @@ export const RecentRepositories: React.FC<RecentRepositoriesProps> = ({ reposito
         {repositories.length === 0 && (
           <div className="text-sm text-slate-400 text-center py-4">No repositories found.</div>
         )}
-        {repositories.slice(0, 5).map((repo) => (
-          <div
-            key={repo.id}
-            onClick={() => handleOpenRepo(repo)}
-            className="glass-card p-4 rounded-xl flex items-center justify-between cursor-pointer hover:border-indigo-500/40 group transition-colors"
-          >
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm text-slate-100 group-hover:text-indigo-300 transition-colors">
-                  {repo.name}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-                  {repo.language}
-                </span>
-              </div>
-              <div className="text-xs text-slate-400 flex items-center gap-3 font-mono">
-                <span>branch: {repo.currentBranch}</span>
-                <span>•</span>
-                <span>{repo.chunksCount} chunks</span>
-              </div>
-            </div>
+        {repositories.slice(0, 5).map((repo) => {
+          const curBranch = repo.current_branch || repo.currentBranch || repo.default_branch || 'main';
+          const chunks = repo.chunks_count ?? repo.chunksCount ?? 0;
+          const status = repo.indexing_status || repo.indexingStatus || 'indexed';
+          const lang = repo.detected_stack?.language || repo.language || 'Codebase';
 
-            <div className="flex items-center gap-3">
-              <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                {repo.indexingStatus}
-              </span>
-              <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
+          return (
+            <div
+              key={repo.id}
+              onClick={() => handleOpenRepo(repo)}
+              className="glass-card p-4 rounded-xl flex items-center justify-between cursor-pointer hover:border-indigo-500/40 group transition-colors"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-slate-100 group-hover:text-indigo-300 transition-colors">
+                    {repo.name}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                    {lang}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 flex items-center gap-3 font-mono">
+                  <span>branch: {curBranch}</span>
+                  <span>•</span>
+                  <span>{chunks.toLocaleString()} chunks</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                  {status}
+                </span>
+                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

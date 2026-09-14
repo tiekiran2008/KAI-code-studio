@@ -11,7 +11,10 @@ from src.domain.entities.repository import (
     RepositoryProvider,
     IndexingStatus,
     RepositoryIndexStatus,
+    FileNode,
+    FileContentResponse,
 )
+
 from src.application.services.repository_service import RepositoryService
 from src.application.services.repository_ingestion_service import RepositoryIngestionService
 from src.interfaces.api.dependencies import (
@@ -231,3 +234,61 @@ def switch_branch(
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found or unauthorized")
     return repo
+
+
+@router.get("/{repo_id}/tree", response_model=List[FileNode])
+def get_repository_tree(
+    repo_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: RepositoryService = Depends(get_repository_service),
+):
+    """Return hierarchical file tree of the repository."""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user token")
+    try:
+        return service.get_file_tree(user_id, repo_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Unauthorized access to repository")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch repository tree: {str(e)}")
+
+
+@router.get("/{repo_id}/files", response_model=List[FileNode])
+def list_repository_files(
+    repo_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: RepositoryService = Depends(get_repository_service),
+):
+    """Alias for /tree endpoint."""
+    return get_repository_tree(repo_id=repo_id, current_user=current_user, service=service)
+
+
+@router.get("/{repo_id}/files/content", response_model=FileContentResponse)
+def get_repository_file_content(
+    repo_id: str,
+    path: str = Query(..., min_length=1, description="Repository-relative file path"),
+    current_user: dict = Depends(get_current_user),
+    service: RepositoryService = Depends(get_repository_service),
+):
+    """Return sandboxed text/binary content for a file in the repository."""
+    from src.domain.entities.patch import UnsafePathError, SymlinkEscapeError
+
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user token")
+    try:
+        return service.get_file_content(user_id, repo_id, path)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except (ValueError, UnsafePathError, SymlinkEscapeError) as e:
+        # Handles path traversal or validation errors
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+

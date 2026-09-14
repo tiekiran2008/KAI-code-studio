@@ -1,5 +1,6 @@
+import uuid
 import jwt
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from supabase import create_client, Client
 from supabase_auth.errors import AuthApiError
@@ -13,12 +14,37 @@ class AuthService:
         supabase_url = settings.SUPABASE_URL
         supabase_key = settings.SUPABASE_KEY or settings.SUPABASE_ANON_KEY
         if supabase_url and supabase_key:
-            self.supabase: Client = create_client(supabase_url, supabase_key)
+            try:
+                self.supabase: Optional[Client] = create_client(supabase_url, supabase_key)
+            except Exception:
+                self.supabase = None
         else:
-            self.supabase = None # Or handle gracefully depending on requirement
+            self.supabase = None
+
+    def _is_dev_bypass_active(self) -> bool:
+        is_production = settings.ENVIRONMENT.lower() in ("production", "prod")
+        return bool(settings.DEV_AUTH_BYPASS and not is_production)
+
+    def _create_dev_session(self, email: str) -> UserSession:
+        dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, email))
+        user = User(
+            id=dev_id,
+            email=email,
+            created_at=datetime.now(timezone.utc),
+        )
+        return UserSession(
+            access_token=f"dev-token-{dev_id}",
+            refresh_token=f"dev-refresh-{dev_id}",
+            expires_in=86400 * 30,
+            expires_at=int(datetime.now(timezone.utc).timestamp()) + (86400 * 30),
+            user=user,
+            confirmation_required=False,
+        )
 
     def signup(self, email: str, password: str) -> UserSession:
         if not self.supabase:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
             raise ValueError("Supabase is not configured.")
         try:
             res = self.supabase.auth.sign_up({"email": email, "password": password})
@@ -49,11 +75,18 @@ class AuthService:
                 confirmation_required=False
             )
         except AuthApiError as e:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
             raise ValueError(e.message)
-
+        except Exception as e:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
+            raise ValueError(f"Authentication service error: {str(e)}")
 
     def login(self, email: str, password: str) -> UserSession:
         if not self.supabase:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
             raise ValueError("Supabase is not configured.")
         try:
             res = self.supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -72,24 +105,29 @@ class AuthService:
                 user=user
             )
         except AuthApiError as e:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
             raise ValueError(e.message)
+        except Exception as e:
+            if self._is_dev_bypass_active():
+                return self._create_dev_session(email)
+            raise ValueError(f"Authentication service error: {str(e)}")
 
     def logout(self, token: str) -> None:
         if not self.supabase:
-            raise ValueError("Supabase is not configured.")
-        # We can sign out via supabase using the access token
-        # To do this correctly, we might need a separate client instance authenticated with this token
-        # Or simply rely on client-side logout. For now, we will attempt to sign out if we have the token
+            return
         try:
-             # create a new client for the user's session to log out
-             user_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-             user_client.auth.set_session(token, "")
-             user_client.auth.sign_out()
+            user_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            user_client.auth.set_session(token, "")
+            user_client.auth.sign_out()
         except Exception:
-            pass # Ignore logout errors on backend
+            pass
 
     def refresh_token(self, refresh_token: str) -> UserSession:
         if not self.supabase:
+            if self._is_dev_bypass_active():
+                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+                return self._create_dev_session(dev_email)
             raise ValueError("Supabase is not configured.")
         try:
             res = self.supabase.auth.refresh_session(refresh_token)
@@ -106,20 +144,30 @@ class AuthService:
                 expires_in=res.session.expires_in,
                 user=user
             )
-        except AuthApiError as e:
-            raise ValueError(e.message)
+        except (AuthApiError, Exception) as e:
+            if self._is_dev_bypass_active():
+                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+                return self._create_dev_session(dev_email)
+            raise ValueError(str(e))
 
     def validate_token(self, token: str) -> dict:
         """
         Validates the JWT token using the Supabase JWT secret.
         Returns the decoded payload if valid.
         """
+        if token.startswith("dev-token-") and self._is_dev_bypass_active():
+            dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+            dev_id = token.replace("dev-token-", "") or str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
+            return {"sub": dev_id, "email": dev_email}
+
         if not settings.SUPABASE_JWT_SECRET:
+            if self._is_dev_bypass_active():
+                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+                dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
+                return {"sub": dev_id, "email": dev_email}
             raise ValueError("SUPABASE_JWT_SECRET is not configured.")
         
         try:
-            # Supabase tokens are signed with the JWT_SECRET
-            # The audience is usually 'authenticated'
             payload = jwt.decode(
                 token, 
                 settings.SUPABASE_JWT_SECRET, 
@@ -130,6 +178,10 @@ class AuthService:
         except jwt.ExpiredSignatureError:
             raise ValueError("Token has expired.")
         except jwt.InvalidTokenError:
+            if self._is_dev_bypass_active():
+                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+                dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
+                return {"sub": dev_id, "email": dev_email}
             raise ValueError("Invalid token.")
 
     def confirm_user_email(self, user_id: str) -> dict:

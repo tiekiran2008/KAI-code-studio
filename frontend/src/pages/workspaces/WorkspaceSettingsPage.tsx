@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 
 const AI_MODELS = [
+  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash (Recommended)', provider: 'Google' },
   { value: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo', provider: 'OpenAI' },
   { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', provider: 'OpenAI' },

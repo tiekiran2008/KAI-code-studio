@@ -6,7 +6,7 @@ which specialized engineering agents will run.
 """
 import json
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 from src.domain.interfaces.llm import ILLMProvider
 from src.domain.models.agents import AgentState, AgentType
 from src.core.logger import logger
@@ -50,34 +50,68 @@ class PlannerAgent:
         logger.info("planner_execution_start", query=query[:60])
 
         prompt = f"User Request: {query}\nDecompose this task and return JSON plan."
+        try:
+            llm_resp = await self.llm.complete(
+                prompt=prompt,
+                system=_PLANNER_SYSTEM_PROMPT,
+                max_tokens=1024,
+                temperature=0.1,
+            )
+            plan = self._parse_plan(llm_resp.content, query)
+        except Exception as exc:
+            logger.warning("planner_llm_failed_fallback_to_heuristic: %s", exc)
+            plan = self._parse_plan("", query)
 
-        llm_resp = await self.llm.complete(
-            prompt=prompt,
-            system=_PLANNER_SYSTEM_PROMPT,
-            max_tokens=1024,
-            temperature=0.1,
-        )
-
-        plan = self._parse_plan(llm_resp.content, query)
         selected = plan.get("selected_agents", ["context", "code_analysis"])
 
-        # Make sure context agent is included if any analysis/code agent is requested
-        if selected and "context" not in selected:
-            selected.insert(0, "context")
-
-        # Respect user review_config check toggles if passed
+        # If review_config is provided, ensure all enabled review agents are scheduled deterministically
         review_config = state.get("review_config", {})
         if isinstance(review_config, dict) and review_config:
-            filtered = []
-            for agent_name in selected:
-                if agent_name == "security_review" and not review_config.get("security", True):
-                    continue
-                if agent_name == "performance" and not review_config.get("performance", True):
-                    continue
-                if agent_name == "code_quality" and not (review_config.get("architecture", False) or review_config.get("code_quality", True) or review_config.get("codeQuality", True)):
-                    continue
-                filtered.append(agent_name)
-            selected = filtered if filtered else ["context", "code_review"]
+            candidate_set = set(selected)
+            
+            # Explicit additions based on review_config flags
+            code_qual = review_config.get("code_quality", review_config.get("codeQuality", True))
+            sec = review_config.get("security", True)
+            perf = review_config.get("performance", True)
+            arch = review_config.get("architecture", False)
+
+            if code_qual:
+                candidate_set.add("code_review")
+                candidate_set.add("code_quality")
+                candidate_set.add("refactoring_analysis")
+            if sec:
+                candidate_set.add("security_review")
+            if perf:
+                candidate_set.add("performance")
+            if arch:
+                candidate_set.add("code_quality")
+
+            # Explicit removals if toggled off
+            if not sec:
+                candidate_set.discard("security_review")
+            if not perf:
+                candidate_set.discard("performance")
+            if not (arch or code_qual):
+                candidate_set.discard("code_quality")
+            if not code_qual:
+                candidate_set.discard("code_review")
+                candidate_set.discard("refactoring_analysis")
+
+            # Maintain deterministic ordering: context -> review agents -> quality/refactor
+            ordered = ["context"]
+            for a in ("code_review", "security_review", "performance", "code_quality", "refactoring_analysis", "documentation"):
+                if a in candidate_set and a not in ordered:
+                    ordered.append(a)
+            # Add any other selected agents
+            for a in selected:
+                if a in candidate_set and a not in ordered:
+                    ordered.append(a)
+
+            selected = ordered if len(ordered) > 1 else ["context", "code_review"]
+        else:
+            # Make sure context agent is included if any analysis/code agent is requested
+            if selected and "context" not in selected:
+                selected.insert(0, "context")
 
         plan["selected_agents"] = selected
 
@@ -106,41 +140,47 @@ class PlannerAgent:
         try:
             # Strip markdown fence if present
             cleaned = content.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
             if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
-            return json.loads(cleaned)
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            data = json.loads(cleaned.strip())
+            if isinstance(data, dict) and "selected_agents" in data and isinstance(data["selected_agents"], list):
+                return data
         except Exception:
-            # Fallback heuristic planning
-            query_lower = query.lower()
-            agents = ["context"]
-            if "bug" in query_lower or "error" in query_lower or "fix" in query_lower:
-                agents.append("bug_detection")
-            if "security" in query_lower or "vulnerability" in query_lower or "auth" in query_lower:
-                agents.append("security_review")
-            if "slow" in query_lower or "performance" in query_lower or "optimize" in query_lower:
-                agents.append("performance")
-            if "test" in query_lower or "mock" in query_lower:
-                agents.append("test_generation")
-            if "doc" in query_lower or "readme" in query_lower:
-                agents.append("documentation")
-            if "review" in query_lower or "solid" in query_lower:
-                agents.append("code_review")
-            if "refactor" in query_lower or "smell" in query_lower or "clean code" in query_lower or "debt" in query_lower:
-                agents.append("refactoring_analysis")
-            if "architecture" in query_lower or "quality" in query_lower or "layer" in query_lower or "health" in query_lower or "coupling" in query_lower:
-                agents.append("code_quality")
-            if "report" in query_lower or "summary" in query_lower or "export" in query_lower or "pdf" in query_lower or "sarif" in query_lower or "executive" in query_lower:
-                # Ensure all upstream analysis agents are included
-                for a in ("code_review", "security_review", "performance", "refactoring_analysis", "code_quality"):
-                    if a not in agents:
-                        agents.append(a)
-                agents.append("report_generation")
-            if len(agents) == 1:
-                agents.append("code_analysis")
+            pass
 
-            return {
-                "summary": "Heuristic fallback plan based on query keywords",
-                "selected_agents": agents,
-                "parallel_groups": [["context"], agents[1:]],
-            }
+        # Fallback heuristic planning
+        query_lower = query.lower()
+        agents = ["context"]
+        if any(kw in query_lower for kw in ("bug", "error", "fix", "issue", "crash", "exception")):
+            agents.append("bug_detection")
+        if any(kw in query_lower for kw in ("security", "vulnerability", "auth", "owasp", "leak", "secret")):
+            agents.append("security_review")
+        if any(kw in query_lower for kw in ("slow", "performance", "optimize", "speed", "latency", "memory", "cpu")):
+            agents.append("performance")
+        if any(kw in query_lower for kw in ("test", "unit test", "mock", "coverage", "pytest")):
+            agents.append("test_generation")
+        if any(kw in query_lower for kw in ("document", "docs", "readme", "docstring")):
+            agents.append("documentation")
+        if any(kw in query_lower for kw in ("review", "solid", "readability")):
+            agents.append("code_review")
+        if any(kw in query_lower for kw in ("refactor", "smell", "clean code", "debt")):
+            agents.append("refactoring_analysis")
+        if any(kw in query_lower for kw in ("architecture", "quality", "layer", "health", "coupling")):
+            agents.append("code_quality")
+        if any(kw in query_lower for kw in ("report", "summary", "export", "pdf", "sarif", "executive", "audit", "full review")):
+            for a in ("code_review", "security_review", "performance", "refactoring_analysis", "code_quality"):
+                if a not in agents:
+                    agents.append(a)
+            agents.append("report_generation")
+        if len(agents) == 1:
+            agents.append("code_analysis")
+
+        return {
+            "summary": "Heuristic fallback plan based on query keywords",
+            "selected_agents": agents,
+            "parallel_groups": [["context"], agents[1:]],
+        }

@@ -12,6 +12,8 @@ import { RefactoringTab } from './RefactoringTab';
 import { ArchitectureTab } from './ArchitectureTab';
 import { FixSuggestionModal } from './FixSuggestionModal';
 import { FixWorkflowStepper } from './FixWorkflowStepper';
+import { CategoryStatusCard } from './CategoryStatusCard';
+import type { FindingSeverityCounts } from './CategoryStatusCard';
 import {
   ArrowLeft,
   Clock,
@@ -35,6 +37,10 @@ import {
   GitCommit,
   UploadCloud,
   GitPullRequest,
+  Undo2,
+  Folder,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -114,6 +120,8 @@ interface FindingRowProps {
   displayNumber: number;
   reviewStatus: CodeReview['status'];
   isGenerating: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (index: number) => void;
   errorMsg?: string | null;
   onGenerateFix: (index: number, finding: ReviewFinding) => void;
   onViewFix: (index: number, finding: ReviewFinding, fix: FixSuggestion) => void;
@@ -125,6 +133,8 @@ const FindingRow: React.FC<FindingRowProps> = ({
   displayNumber,
   reviewStatus,
   isGenerating,
+  isSelected,
+  onToggleSelect,
   errorMsg,
   onGenerateFix,
   onViewFix,
@@ -135,6 +145,19 @@ const FindingRow: React.FC<FindingRowProps> = ({
   return (
     <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/40">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3">
+        {onToggleSelect && (
+          <button
+            onClick={() => onToggleSelect(originalIndex)}
+            className="p-1 text-slate-500 hover:text-indigo-400 transition-colors shrink-0"
+            aria-label={isSelected ? 'Deselect finding' : 'Select finding'}
+          >
+            {isSelected ? (
+              <CheckSquare className="w-4 h-4 text-indigo-400" />
+            ) : (
+              <Square className="w-4 h-4" />
+            )}
+          </button>
+        )}
         <button
           className="flex-1 flex items-start gap-3 text-left hover:opacity-90 transition-opacity"
           onClick={() => setExpanded((x) => !x)}
@@ -158,6 +181,11 @@ const FindingRow: React.FC<FindingRowProps> = ({
               {fix && fix.application_status === 'applied' && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded-full">
                   <CheckCircle2 className="w-2.5 h-2.5" /> Applied
+                </span>
+              )}
+              {fix && fix.application_status === 'rolled_back' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                  <Undo2 className="w-2.5 h-2.5" /> Rolled Back
                 </span>
               )}
               {fix && fix.application_status === 'applied' && fix.static_verification && (
@@ -282,8 +310,16 @@ const FindingRow: React.FC<FindingRowProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
               View Fix
             </button>
+          ) : !finding.file_path || !finding.file_path.trim() ? (
+            <span
+              id={`badge-manual-fix-${originalIndex}`}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 bg-slate-800/80 border border-slate-700/60 px-2.5 py-1 rounded-lg"
+              title="Automated fix requires an affected file path"
+            >
+              Manual Fix Required
+            </span>
           ) : (
-            reviewStatus === 'completed' && (
+            (!reviewStatus || reviewStatus.toLowerCase() === 'completed') && (
               <button
                 id={`btn-generate-fix-${originalIndex}`}
                 onClick={(e) => {
@@ -301,7 +337,7 @@ const FindingRow: React.FC<FindingRowProps> = ({
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                    Generate Fix
+                    Auto Fix
                   </>
                 )}
               </button>
@@ -401,6 +437,9 @@ interface FindingsPanelProps {
   generationError: { index: number; message: string } | null;
   onGenerateFix: (index: number, finding: ReviewFinding) => void;
   onViewFix: (index: number, finding: ReviewFinding, fix: FixSuggestion) => void;
+  onFixAllSafe?: () => Promise<void>;
+  onFixBatch?: (indices: number[]) => Promise<void>;
+  isBatchFixing?: boolean;
 }
 
 const FindingsPanel: React.FC<FindingsPanelProps> = ({
@@ -412,12 +451,17 @@ const FindingsPanel: React.FC<FindingsPanelProps> = ({
   generationError,
   onGenerateFix,
   onViewFix,
+  onFixAllSafe,
+  onFixBatch,
+  isBatchFixing = false,
 }) => {
   const [search, setSearch] = useState('');
   const [sevFilter, setSevFilter] = useState<FindingSeverity | 'all'>('all');
   const [sortField, setSortField] = useState<'severity' | 'file' | 'confidence'>('severity');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
+  const [groupByFile, setGroupByFile] = useState(false);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const PAGE = 10;
 
   // Pair each finding with its original index in review.findings to ensure exact finding_index routing
@@ -452,6 +496,17 @@ const FindingsPanel: React.FC<FindingsPanelProps> = ({
     return list;
   }, [indexedFindings, search, sevFilter, sortField, sortDir]);
 
+  // Grouping by file
+  const groupedByFile = useMemo(() => {
+    const map = new Map<string, typeof filtered>();
+    filtered.forEach((item) => {
+      const file = item.finding.file_path || 'Unassigned File';
+      if (!map.has(file)) map.set(file, []);
+      map.get(file)!.push(item);
+    });
+    return Array.from(map.entries());
+  }, [filtered]);
+
   const totalPages = Math.ceil(filtered.length / PAGE);
   const paginated = filtered.slice(page * PAGE, page * PAGE + PAGE);
 
@@ -464,16 +519,60 @@ const FindingsPanel: React.FC<FindingsPanelProps> = ({
     setPage(0);
   };
 
+  const handleToggleSelect = (idx: number) => {
+    setSelectedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIndices.size === filtered.length) {
+      setSelectedIndices(new Set());
+    } else {
+      setSelectedIndices(new Set(filtered.map((item) => item.originalIndex)));
+    }
+  };
+
+  const handleTriggerFixSelected = async () => {
+    if (onFixBatch && selectedIndices.size > 0) {
+      await onFixBatch(Array.from(selectedIndices));
+      setSelectedIndices(new Set());
+    }
+  };
+
   if (!findings.length) {
+    // Empty state is now handled by the parent via CategoryStatusCard
+    // This fallback only fires when no CategoryStatusCard is rendered
+    const isCompleted = reviewStatus && reviewStatus.toLowerCase() === 'completed';
+    const isFailed = reviewStatus && reviewStatus.toLowerCase() === 'failed';
+    const isCancelled = reviewStatus && reviewStatus.toLowerCase() === 'cancelled';
+
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-3 text-slate-400">
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400">
-          {emptyIcon}
+        <div
+          className={`p-3 rounded-2xl ${
+            isFailed
+              ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+              : isCancelled
+              ? 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+              : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+          }`}
+        >
+          {isFailed ? <AlertCircle className="w-12 h-12 text-rose-400" /> : isCancelled ? <AlertCircle className="w-12 h-12 text-amber-400" /> : emptyIcon}
         </div>
         <div className="text-center space-y-1">
-          <p className="text-sm font-semibold text-slate-200">{emptyLabel}</p>
+          <p className="text-sm font-semibold text-slate-200">
+            {isFailed ? 'Analysis unavailable due to review failure' : isCancelled ? 'Analysis not completed (Review cancelled)' : emptyLabel}
+          </p>
           <p className="text-xs text-slate-400 max-w-sm">
-            All automated checks passed with zero issues identified in this category.
+            {isFailed
+              ? 'The automated review for this category did not complete successfully.'
+              : isCancelled
+              ? 'This review run was cancelled before analysis could finish.'
+              : 'All automated checks passed with zero issues identified in this category.'}
           </p>
         </div>
       </div>
@@ -482,6 +581,77 @@ const FindingsPanel: React.FC<FindingsPanelProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Batch Actions & Grouping Toolbar */}
+      {(!reviewStatus || reviewStatus.toLowerCase() === 'completed') && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-xs">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSelectAll}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            >
+              {selectedIndices.size > 0 && selectedIndices.size === filtered.length ? (
+                <CheckSquare className="w-3.5 h-3.5 text-indigo-400" />
+              ) : (
+                <Square className="w-3.5 h-3.5" />
+              )}
+              <span>{selectedIndices.size === filtered.length ? 'Deselect All' : 'Select All'}</span>
+            </button>
+            {selectedIndices.size > 0 && (
+              <span className="text-slate-400 font-mono">
+                ({selectedIndices.size} selected)
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="btn-toggle-group-by-file"
+              onClick={() => setGroupByFile((g) => !g)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold border transition-all ${
+                groupByFile
+                  ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
+            >
+              <Folder className="w-3.5 h-3.5" />
+              {groupByFile ? 'Flat List' : 'Group by File'}
+            </button>
+
+            {onFixBatch && (
+              <button
+                id="btn-fix-selected"
+                onClick={handleTriggerFixSelected}
+                disabled={selectedIndices.size === 0 || isBatchFixing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500 shadow-sm transition-all disabled:opacity-40"
+              >
+                {isBatchFixing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                Fix Selected {selectedIndices.size > 0 ? `(${selectedIndices.size})` : ''}
+              </button>
+            )}
+
+            {onFixAllSafe && (
+              <button
+                id="btn-fix-all-safe"
+                onClick={onFixAllSafe}
+                disabled={isBatchFixing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-sm transition-all disabled:opacity-40"
+              >
+                {isBatchFixing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                Fix All Safe Issues
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Filters row */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
@@ -526,31 +696,68 @@ const FindingsPanel: React.FC<FindingsPanelProps> = ({
         </div>
       </div>
 
-      {/* Findings */}
-      <div className="space-y-2">
-        {paginated.length === 0 ? (
-          <div className="flex items-center gap-2 p-4 text-xs text-slate-500">
-            <Info className="w-4 h-4" /> No findings match your filters.
-          </div>
-        ) : (
-          paginated.map((item, i) => (
-            <FindingRow
-              key={`${item.finding.file_path}-${item.originalIndex}`}
-              finding={item.finding}
-              originalIndex={item.originalIndex}
-              displayNumber={page * PAGE + i + 1}
-              reviewStatus={reviewStatus}
-              isGenerating={Boolean(generatingIndices[item.originalIndex])}
-              errorMsg={generationError?.index === item.originalIndex ? generationError.message : null}
-              onGenerateFix={onGenerateFix}
-              onViewFix={onViewFix}
-            />
-          ))
-        )}
-      </div>
+      {/* Findings content: Grouped vs Paginated Flat List */}
+      {groupByFile ? (
+        <div className="space-y-4">
+          {groupedByFile.map(([filePath, items]) => (
+            <div key={filePath} className="border border-slate-800 rounded-2xl p-4 bg-slate-950/40 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                <div className="flex items-center gap-2 font-mono text-xs text-indigo-300">
+                  <Folder className="w-4 h-4 text-indigo-400" />
+                  <span>{filePath}</span>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {items.length} {items.length === 1 ? 'issue' : 'issues'}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {items.map((item, i) => (
+                  <FindingRow
+                    key={`${item.finding.file_path}-${item.originalIndex}`}
+                    finding={item.finding}
+                    originalIndex={item.originalIndex}
+                    displayNumber={i + 1}
+                    reviewStatus={reviewStatus}
+                    isGenerating={Boolean(generatingIndices[item.originalIndex])}
+                    isSelected={selectedIndices.has(item.originalIndex)}
+                    onToggleSelect={handleToggleSelect}
+                    errorMsg={generationError?.index === item.originalIndex ? generationError.message : null}
+                    onGenerateFix={onGenerateFix}
+                    onViewFix={onViewFix}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {paginated.length === 0 ? (
+            <div className="flex items-center gap-2 p-4 text-xs text-slate-500">
+              <Info className="w-4 h-4" /> No findings match your filters.
+            </div>
+          ) : (
+            paginated.map((item, i) => (
+              <FindingRow
+                key={`${item.finding.file_path}-${item.originalIndex}`}
+                finding={item.finding}
+                originalIndex={item.originalIndex}
+                displayNumber={page * PAGE + i + 1}
+                reviewStatus={reviewStatus}
+                isGenerating={Boolean(generatingIndices[item.originalIndex])}
+                isSelected={selectedIndices.has(item.originalIndex)}
+                onToggleSelect={handleToggleSelect}
+                errorMsg={generationError?.index === item.originalIndex ? generationError.message : null}
+                onGenerateFix={onGenerateFix}
+                onViewFix={onViewFix}
+              />
+            ))
+          )}
+        </div>
+      )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {/* Pagination (only for flat list) */}
+      {!groupByFile && totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
           <span className="text-xs text-slate-500">
             Page {page + 1} of {totalPages}
@@ -597,6 +804,61 @@ export const ReviewResultsPage: React.FC = () => {
 
   const [generatingIndices, setGeneratingIndices] = useState<Record<number, boolean>>({});
   const [generationError, setGenerationError] = useState<{ index: number; message: string } | null>(null);
+  const [isBatchFixing, setIsBatchFixing] = useState<boolean>(false);
+
+  const handleFixAllSafe = async () => {
+    if (!reviewId || isBatchFixing) return;
+    setIsBatchFixing(true);
+    try {
+      const res = await reviewsApi.fixAllSafe(reviewId);
+      if (res.results) {
+        setReview((prev) => {
+          if (!prev) return prev;
+          const updatedFindings = [...(prev.findings || [])];
+          res.results.forEach((r) => {
+            if (r.fix_suggestion && updatedFindings[r.finding_index]) {
+              updatedFindings[r.finding_index] = {
+                ...updatedFindings[r.finding_index],
+                fix_suggestion: r.fix_suggestion,
+              };
+            }
+          });
+          return { ...prev, findings: updatedFindings };
+        });
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Failed to auto fix safe issues');
+    } finally {
+      setIsBatchFixing(false);
+    }
+  };
+
+  const handleFixBatch = async (indices: number[]) => {
+    if (!reviewId || isBatchFixing || !indices.length) return;
+    setIsBatchFixing(true);
+    try {
+      const res = await reviewsApi.fixBatch(reviewId, indices);
+      if (res.results) {
+        setReview((prev) => {
+          if (!prev) return prev;
+          const updatedFindings = [...(prev.findings || [])];
+          res.results.forEach((r) => {
+            if (r.fix_suggestion && updatedFindings[r.finding_index]) {
+              updatedFindings[r.finding_index] = {
+                ...updatedFindings[r.finding_index],
+                fix_suggestion: r.fix_suggestion,
+              };
+            }
+          });
+          return { ...prev, findings: updatedFindings };
+        });
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Failed to auto fix selected issues');
+    } finally {
+      setIsBatchFixing(false);
+    }
+  };
 
   const refreshData = async (showLoading = false) => {
     if (!reviewId) return;
@@ -734,13 +996,30 @@ export const ReviewResultsPage: React.FC = () => {
   const securityFindings = codeFindings.filter(
     (f) => (f as any).cwe_id || (f as any).owasp_category || (f as any).attack_scenario
   );
+  // Code quality = findings that are NOT security
+  const cqFindings = codeFindings.filter(
+    (f) => !((f as any).cwe_id || (f as any).owasp_category || (f as any).attack_scenario)
+  );
   const perfFindings = review.performance_findings || [];
   const perfRecs = review.performance_recommendations || [];
   const refactoringFindings = review.refactoring_findings || [];
   const archFindings = review.architecture_findings || [];
+  const catMeta = review.category_metadata;
+
+  // Severity breakdown helpers
+  const countSeverities = (items: { severity: string }[]): FindingSeverityCounts => ({
+    critical: items.filter(f => f.severity === 'critical').length,
+    high:     items.filter(f => f.severity === 'high').length,
+    medium:   items.filter(f => f.severity === 'medium').length,
+    low:      items.filter(f => f.severity === 'low').length,
+    info:     items.filter(f => f.severity === 'info').length,
+  });
+
+  const cqSevCounts = countSeverities(cqFindings as any[]);
+  const secSevCounts = countSeverities(securityFindings as any[]);
 
   const TABS: { id: ReviewTab; label: string; icon: React.ReactNode; count: number }[] = [
-    { id: 'code', label: 'Code Quality', icon: <Code2 className="w-4 h-4" />, count: codeFindings.length },
+    { id: 'code', label: 'Code Quality', icon: <Code2 className="w-4 h-4" />, count: cqFindings.length },
     { id: 'security', label: 'Security', icon: <ShieldAlert className="w-4 h-4" />, count: securityFindings.length },
     { id: 'performance', label: 'Performance', icon: <Zap className="w-4 h-4" />, count: perfFindings.length },
     { id: 'refactoring', label: 'Refactoring', icon: <Wrench className="w-4 h-4" />, count: refactoringFindings.length },
@@ -871,16 +1150,28 @@ export const ReviewResultsPage: React.FC = () => {
             <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2 mb-4">
               <Code2 className="w-4 h-4 text-indigo-400" /> Code Quality Findings
             </h2>
-            <FindingsPanel
-              findings={codeFindings}
-              emptyIcon={<CheckCircle2 className="w-12 h-12 text-emerald-400" />}
-              emptyLabel="No code quality issues found."
+            <CategoryStatusCard
+              categoryKey="code_quality"
               reviewStatus={review.status}
-              generatingIndices={generatingIndices}
-              generationError={generationError}
-              onGenerateFix={handleGenerateFix}
-              onViewFix={handleViewFix}
+              metadata={catMeta?.code_quality}
+              findingsCount={cqFindings.length}
+              severityCounts={cqSevCounts}
             />
+            {cqFindings.length > 0 && (
+              <FindingsPanel
+                findings={cqFindings}
+                emptyIcon={<CheckCircle2 className="w-12 h-12 text-emerald-400" />}
+                emptyLabel="No code quality issues found."
+                reviewStatus={review.status}
+                generatingIndices={generatingIndices}
+                generationError={generationError}
+                onGenerateFix={handleGenerateFix}
+                onViewFix={handleViewFix}
+                onFixAllSafe={handleFixAllSafe}
+                onFixBatch={handleFixBatch}
+                isBatchFixing={isBatchFixing}
+              />
+            )}
           </div>
         )}
 
@@ -889,16 +1180,28 @@ export const ReviewResultsPage: React.FC = () => {
             <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2 mb-4">
               <ShieldAlert className="w-4 h-4 text-rose-400" /> Security Findings
             </h2>
-            <FindingsPanel
-              findings={securityFindings}
-              emptyIcon={<CheckCircle2 className="w-12 h-12 text-emerald-400" />}
-              emptyLabel="No security vulnerabilities found."
+            <CategoryStatusCard
+              categoryKey="security"
               reviewStatus={review.status}
-              generatingIndices={generatingIndices}
-              generationError={generationError}
-              onGenerateFix={handleGenerateFix}
-              onViewFix={handleViewFix}
+              metadata={catMeta?.security}
+              findingsCount={securityFindings.length}
+              severityCounts={secSevCounts}
             />
+            {securityFindings.length > 0 && (
+              <FindingsPanel
+                findings={securityFindings}
+                emptyIcon={<CheckCircle2 className="w-12 h-12 text-emerald-400" />}
+                emptyLabel="No security vulnerabilities found."
+                reviewStatus={review.status}
+                generatingIndices={generatingIndices}
+                generationError={generationError}
+                onGenerateFix={handleGenerateFix}
+                onViewFix={handleViewFix}
+                onFixAllSafe={handleFixAllSafe}
+                onFixBatch={handleFixBatch}
+                isBatchFixing={isBatchFixing}
+              />
+            )}
           </div>
         )}
 
@@ -910,6 +1213,8 @@ export const ReviewResultsPage: React.FC = () => {
             estimatedCpuSavings={review.estimated_cpu_savings ?? 0}
             estimatedMemorySavings={review.estimated_memory_savings ?? 0}
             estimatedLatencyImprovement={review.estimated_latency_improvement ?? 0}
+            reviewStatus={review.status}
+            categoryMetadata={catMeta?.performance}
           />
         )}
 
@@ -921,6 +1226,8 @@ export const ReviewResultsPage: React.FC = () => {
             estimatedMaintainabilityImprovement={review.estimated_maintainability_improvement ?? 0}
             estimatedTechnicalDebtReduction={review.estimated_technical_debt_reduction ?? 0}
             estimatedComplexityReduction={review.estimated_complexity_reduction ?? 0}
+            reviewStatus={review.status}
+            categoryMetadata={catMeta?.refactoring}
           />
         )}
 
@@ -936,6 +1243,8 @@ export const ReviewResultsPage: React.FC = () => {
             modularityScore={review.modularity_score ?? null}
             testabilityScore={review.testability_score ?? null}
             dependencyAnalysis={review.dependency_analysis}
+            reviewStatus={review.status}
+            categoryMetadata={catMeta?.architecture}
           />
         )}
       </div>

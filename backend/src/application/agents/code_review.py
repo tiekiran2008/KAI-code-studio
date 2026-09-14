@@ -12,7 +12,13 @@ from src.domain.models.agents import AgentState, AgentType
 from src.core.logger import logger
 
 _SYSTEM_PROMPT = """You are a Principal AI Code Reviewer.
-Conduct a rigorous code review on the provided code context.
+Conduct a rigorous code review strictly grounded in the provided code context.
+
+STRICT GROUNDING RULES:
+1. Every finding must be directly observable in the retrieved code.
+2. The `file_path` and `line_number` MUST exist in and match the provided context lines.
+3. NEVER invent files, functions, dependencies, or line numbers.
+4. If no issues are found in the retrieved code, return an empty array `[]`.
 
 Focus on detecting:
 - Large functions
@@ -49,6 +55,8 @@ class CodeReviewAgent:
 
     async def execute(self, state: AgentState) -> Dict[str, Any]:
         start = time.perf_counter()
+        query = state.get("query", "")
+        context = state.get("retrieved_context", "")
         review_config = state.get("review_config", {})
         strictness = review_config.get("strictness", "medium")
 

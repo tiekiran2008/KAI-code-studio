@@ -107,6 +107,7 @@ class Repository(BaseModel):
     language_stats: List[LanguageStat] = Field(default_factory=list)
     detected_stack: Optional[DetectedStack] = None
     indexing_status: IndexingStatus = IndexingStatus.PENDING
+    indexing_error: Optional[str] = None
     chunks_count: int = 0
     last_indexed_at: Optional[datetime] = None
     is_private: bool = False
@@ -115,6 +116,18 @@ class Repository(BaseModel):
     updated_at: Optional[datetime] = None  # NULL right after INSERT
     
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def validate_provider(cls, v: Any) -> RepositoryProvider:
+        if v is None:
+            return RepositoryProvider.GITHUB
+        if isinstance(v, RepositoryProvider):
+            return v
+        try:
+            return RepositoryProvider(str(v).lower())
+        except ValueError:
+            return RepositoryProvider.GITHUB
 
 
 class RepositoryHealthCheck(BaseModel):
@@ -147,4 +160,24 @@ class RepositoryIndexStatus(BaseModel):
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class FileNode(BaseModel):
+    id: str
+    name: str
+    path: str
+    type: str = "file"  # "file" | "directory"
+    size: Optional[int] = None
+    language: Optional[str] = None
+    children: Optional[List["FileNode"]] = None
+
+
+class FileContentResponse(BaseModel):
+    path: str
+    name: str
+    content: str
+    size: int
+    language: str
+    is_binary: bool = False
+
 

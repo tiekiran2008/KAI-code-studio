@@ -30,7 +30,7 @@ export const AnalyticsPage: React.FC = () => {
         </div>
 
         <div className="px-3 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-mono flex items-center gap-2">
-          <Activity className="w-4 h-4 text-cyan-400 animate-pulse" /> Live Telemetry Pipeline
+          <Activity className="w-4 h-4 text-cyan-400" /> Telemetry Metrics (Preview)
         </div>
       </div>
 
@@ -130,7 +130,7 @@ export const AnalyticsPage: React.FC = () => {
             <div className="glass-card p-4 rounded-xl space-y-1">
               <div className="text-xs text-slate-400">Memory Hit Rate</div>
               <div className="text-xl font-bold text-emerald-400 font-mono">
-                {(analytics.memoryHitRate * 100).toFixed(1)}%
+                {(analytics.memoryHitRate > 1 ? analytics.memoryHitRate : analytics.memoryHitRate * 100).toFixed(1)}%
               </div>
             </div>
 

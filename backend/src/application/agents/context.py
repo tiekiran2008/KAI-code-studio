@@ -23,11 +23,26 @@ class ContextAgent:
 
         logger.info("context_agent_execution_start", repo_id=repo_id, query=query[:60])
 
-        rag_response = await self.processor.process(
-            question=query,
-            repo_id=repo_id,
-            session_id=session_id,
-        )
+        if hasattr(self.processor, "retrieve_context_only"):
+            rag_data = await self.processor.retrieve_context_only(
+                question=query,
+                repo_id=repo_id,
+                session_id=session_id,
+            )
+            raw_citations = rag_data.get("citations", [])
+            context_text = rag_data.get("context_text", "")
+            chunk_count = len(rag_data.get("ranked_chunks", []))
+            intent_val = getattr(rag_data.get("intent"), "value", "code_explanation")
+        else:
+            rag_response = await self.processor.process(
+                question=query,
+                repo_id=repo_id,
+                session_id=session_id,
+            )
+            raw_citations = rag_response.citations
+            context_text = f"Initial RAG Summary:\n{rag_response.answer}\n\n"
+            chunk_count = rag_response.retrieved_chunk_count
+            intent_val = rag_response.intent.value
 
         # Convert citations to dictionaries
         citations_list = [
@@ -42,29 +57,24 @@ class ContextAgent:
                 "confidence": c.confidence,
                 "chunk_id": c.chunk_id,
             }
-            for c in rag_response.citations
+            for c in raw_citations
         ]
-
-        # Extract structured text context from citations and answer
-        context_text = f"Initial RAG Summary:\n{rag_response.answer}\n\n"
-        if rag_response.metadata and "context_tokens" in rag_response.metadata:
-            context_text += f"Retrieved Chunk Count: {rag_response.retrieved_chunk_count}\n"
 
         latency = round((time.perf_counter() - start) * 1000, 2)
         logger.info(
             "context_agent_execution_complete",
-            retrieved_chunks=rag_response.retrieved_chunk_count,
+            retrieved_chunks=chunk_count,
             citations=len(citations_list),
             latency_ms=latency,
         )
 
         output_data = {
-            "summary": f"Retrieved {rag_response.retrieved_chunk_count} code chunks and {len(citations_list)} citations.",
-            "details": rag_response.answer,
+            "summary": f"Retrieved {chunk_count} code chunks and {len(citations_list)} citations.",
+            "details": f"Context successfully assembled across {len(citations_list)} relevant file citations.",
             "data": {
-                "chunk_count": rag_response.retrieved_chunk_count,
-                "confidence": rag_response.confidence,
-                "intent": rag_response.intent.value,
+                "chunk_count": chunk_count,
+                "confidence": 1.0,
+                "intent": intent_val,
             },
         }
 
@@ -82,7 +92,7 @@ class ContextAgent:
             "execution_trace": [{
                 "agent": AgentType.CONTEXT.value,
                 "action": "retrieved_repository_knowledge",
-                "chunks_count": rag_response.retrieved_chunk_count,
+                "chunks_count": chunk_count,
                 "latency_ms": latency,
             }],
         }

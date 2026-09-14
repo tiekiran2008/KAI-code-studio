@@ -35,7 +35,12 @@ class GitHubIntegrationService:
         # Store state in memory with timestamp
         GitHubIntegrationService._state_cache[state] = (user_id, datetime.now(timezone.utc).timestamp())
 
-        client_id = settings.GITHUB_CLIENT_ID or "placeholder_client_id"
+        client_id = settings.GITHUB_CLIENT_ID
+        if not client_id:
+            raise RuntimeError(
+                "GITHUB_CLIENT_ID is not configured. "
+                "Add it to backend/.env and restart the backend container."
+            )
         redirect_uri = settings.GITHUB_REDIRECT_URI
         scope = "repo,read:user,user:email"
 
@@ -50,13 +55,21 @@ class GitHubIntegrationService:
 
     def validate_state(self, state: str) -> Optional[str]:
         """Validate CSRF state and return the associated user_id if valid and not expired."""
-        if not state or state not in GitHubIntegrationService._state_cache:
+        if not state:
+            logger.warning("OAuth state parameter is missing or empty")
+            return None
+        if state not in GitHubIntegrationService._state_cache:
+            logger.warning(
+                "OAuth state parameter not found in cache. State might have expired or backend was restarted.",
+                cached_count=len(GitHubIntegrationService._state_cache),
+            )
             return None
 
         user_id, created_at = GitHubIntegrationService._state_cache.pop(state)
         now = datetime.now(timezone.utc).timestamp()
         # Expire after 10 minutes (600 seconds)
         if now - created_at > 600:
+            logger.warning("OAuth state parameter expired (>600s)", elapsed_seconds=now - created_at)
             return None
         return user_id
 
@@ -205,6 +218,9 @@ class GitHubIntegrationService:
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, timeout=15.0)
+            if resp.status_code == 401:
+                logger.warning("GitHub API returned 401 Unauthorized for connected user token", user_id=user_id)
+                raise PermissionError("GitHub connection has expired or token was revoked")
             if resp.status_code != 200:
                 raise RuntimeError(f"GitHub API Error: {resp.status_code}")
             repos_data = resp.json()

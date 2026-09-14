@@ -200,6 +200,7 @@ def test_user_a_starts_review_for_own_repository(mock_agent_executor):
     repo = MagicMock()
     repo.id = repo_a_id
     repo.user_id = user_a_id
+    repo.indexing_status = "indexed"
     mock_repo_service.get_repository.return_value = repo
 
     mock_code_review_service = MagicMock()
@@ -220,6 +221,38 @@ def test_user_a_starts_review_for_own_repository(mock_agent_executor):
     assert data["status"] == "pending"
     assert "review_id" in data
     mock_code_review_service.create_review.assert_called_once()
+
+    app.dependency_overrides.clear()
+
+
+def test_unindexed_repository_rejects_review(mock_agent_executor):
+    """TEST 6b: Repository indexing status != indexed -> 400 Bad Request"""
+    user_a_id = "user_a_123"
+    repo_a_id = "repo_owned_by_user_a"
+
+    mock_repo_service = MagicMock()
+    repo = MagicMock()
+    repo.id = repo_a_id
+    repo.user_id = user_a_id
+    repo.indexing_status = "failed"
+    mock_repo_service.get_repository.return_value = repo
+
+    mock_code_review_service = MagicMock()
+
+    app.dependency_overrides[get_current_user] = lambda: {"sub": user_a_id}
+    app.dependency_overrides[get_code_review_service] = lambda: mock_code_review_service
+    app.dependency_overrides[get_repository_service] = lambda: mock_repo_service
+    app.dependency_overrides[get_agent_use_case] = lambda: mock_agent_executor
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/v1/reviews/start",
+        json={"repository_id": repo_a_id},
+    )
+
+    assert res.status_code == 400
+    assert "Repository indexing must complete before code review can start." in res.json()["detail"]
+    mock_code_review_service.create_review.assert_not_called()
 
     app.dependency_overrides.clear()
 

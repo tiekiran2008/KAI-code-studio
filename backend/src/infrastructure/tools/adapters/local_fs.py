@@ -51,7 +51,8 @@ class LocalFileSystemAdapter(ITool):
         rel_path = kwargs.get("path", "")
         pattern = kwargs.get("pattern", "*")
 
-        target_path = (self.workspace_root / rel_path).resolve()
+        clean_path = rel_path.lstrip("/\\") if isinstance(rel_path, str) else str(rel_path)
+        target_path = (self.workspace_root / clean_path).resolve()
         
         if not self._is_safe_path(target_path):
             return ToolResult(success=False, error=f"Path traversal detected or out of workspace bound: {rel_path}")

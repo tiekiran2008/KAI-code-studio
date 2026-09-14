@@ -28,7 +28,7 @@ class DBRepository(Base):
     # Source information
     # ---------------------------------------------------------------
     url          = Column(String, nullable=False)
-    provider     = Column(String, default="github")          # github | gitlab | bitbucket | local
+    provider     = Column(String, default="github", server_default="github", nullable=False)          # github | gitlab | bitbucket | local
     name         = Column(String, nullable=False)
     description  = Column(Text, nullable=True)
     owner        = Column(String, nullable=True)
@@ -59,6 +59,7 @@ class DBRepository(Base):
     # Indexing pipeline state
     # ---------------------------------------------------------------
     indexing_status = Column(String, default="pending")   # pending|indexing|indexed|failed|stale
+    indexing_error  = Column(Text, nullable=True)
     last_indexed_at = Column(DateTime(timezone=True), nullable=True)
 
     # ---------------------------------------------------------------
@@ -127,4 +128,5 @@ from src.infrastructure.persistence.team_models import DBTeam, DBTeamMember, DBI
 from src.infrastructure.persistence.code_review_models import DBCodeReview                                       # noqa: F401, E402
 from src.infrastructure.persistence.report_models import DBReport                                                # noqa: F401, E402
 from src.infrastructure.persistence.github_models import DBGitHubIntegration                                     # noqa: F401, E402
+from src.infrastructure.persistence.conversation_models import DBConversationSession, DBConversationMessage     # noqa: F401, E402
 

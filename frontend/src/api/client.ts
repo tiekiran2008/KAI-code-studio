@@ -1,6 +1,4 @@
 import { 
-  MOCK_REPOSITORIES, 
-  MOCK_FILE_TREE, 
   MOCK_MEMORIES, 
   MOCK_TOOLS, 
   MOCK_ANALYTICS, 
@@ -12,182 +10,238 @@ import {
   MemoryRecord, 
   ToolMetadata, 
   AnalyticsMetrics, 
-  ConversationSession 
+  ConversationSession,
+  ChatMessage 
 } from '../types';
+import { fetchClient } from './fetchClient';
 
-const API_BASE = '/api/v1';
-
-async function fetchWithFallback<T>(url: string, fallbackData: T): Promise<T> {
-  try {
-    const res = await fetch(`${API_BASE}${url}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn(`API call to ${url} failed, using fallback data.`, err);
-    return fallbackData;
-  }
+function mapMemoryResponse(m: any): MemoryRecord {
+  return {
+    id: m.id,
+    userId: m.user_id || 'usr-admin-1',
+    repositoryId: m.repository_id || undefined,
+    memoryType: m.memory_type || 'long_term',
+    content: m.content || m.summary || '',
+    importanceScore: m.score?.importance ?? 0.8,
+    createdAt: m.created_at || new Date().toISOString(),
+    updatedAt: m.created_at || new Date().toISOString(),
+    techStack: m.score?.tags || [],
+    isEncrypted: m.metadata?.encrypted ?? false,
+  };
 }
 
 export const api = {
   // Repositories
   getRepositories: async (): Promise<Repository[]> => {
-    return fetchWithFallback('/repositories', MOCK_REPOSITORIES);
+    return fetchClient.get<Repository[]>('/repositories');
   },
 
   importRepository: async (url: string, branch: string): Promise<Repository> => {
-    try {
-      const res = await fetch(`${API_BASE}/repositories/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repository_url: url, default_branch: branch })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend repo import failed, simulating client import', e);
-    }
-    const newRepo: Repository = {
-      id: `repo-${Date.now()}`,
-      name: url.split('/').pop() || 'imported-repo',
-      owner: 'github-user',
+    return fetchClient.post<Repository>('/repositories/import', {
       url,
-      defaultBranch: branch,
-      currentBranch: branch,
-      branches: [branch, 'main', 'dev'],
-      indexingStatus: 'indexed',
-      chunksCount: 540,
-      lastIndexedAt: new Date().toISOString(),
-      language: 'TypeScript / Python'
-    };
-    MOCK_REPOSITORIES.unshift(newRepo);
-    return newRepo;
+      default_branch: branch || 'main',
+    });
   },
 
   uploadLocalRepository: async (name: string, file?: File): Promise<Repository> => {
-    try {
-      const formData = new FormData();
-      formData.append('name', name);
-      if (file) formData.append('file', file);
-      const res = await fetch(`${API_BASE}/repositories/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend repo upload failed, simulating client upload', e);
-    }
-    const newRepo: Repository = {
-      id: `repo-${Date.now()}`,
-      name: name || (file ? file.name.replace(/\.[^/.]+$/, '') : 'uploaded-local-repo'),
-      owner: 'local-user',
-      url: 'file://local-storage',
-      defaultBranch: 'main',
-      currentBranch: 'main',
-      branches: ['main'],
-      indexingStatus: 'indexing',
-      chunksCount: 120,
-      lastIndexedAt: new Date().toISOString(),
-      language: 'TypeScript / JavaScript',
-      isLocal: true,
-    };
-    MOCK_REPOSITORIES.unshift(newRepo);
-    return newRepo;
+    const formData = new FormData();
+    formData.append('name', name);
+    if (file) formData.append('file', file);
+    return fetchClient.post<Repository>('/repositories/upload', formData);
   },
 
   deleteRepository: async (repoId: string): Promise<boolean> => {
-    try {
-      const res = await fetch(`${API_BASE}/repositories/${repoId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) return true;
-    } catch (e) {
-      console.warn('Backend repo delete failed, simulating client delete', e);
-    }
-    const idx = MOCK_REPOSITORIES.findIndex((r) => r.id === repoId);
-    if (idx !== -1) {
-      MOCK_REPOSITORIES.splice(idx, 1);
-    }
+    await fetchClient.delete(`/repositories/${repoId}`);
     return true;
   },
 
   reindexRepository: async (repoId: string): Promise<Repository | null> => {
-    try {
-      const res = await fetch(`${API_BASE}/repositories/${repoId}/reindex`, {
-        method: 'POST',
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend reindex failed, simulating client reindex', e);
-    }
-    const repo = MOCK_REPOSITORIES.find((r) => r.id === repoId);
-    if (repo) {
-      repo.indexingStatus = 'indexing';
-      repo.lastIndexedAt = new Date().toISOString();
-    }
-    return repo || null;
+    return fetchClient.post<Repository>(`/repositories/${repoId}/reindex`);
   },
 
-  // File Tree
+  // File Tree & Content
   getFileTree: async (repoId: string): Promise<FileNode[]> => {
-    return fetchWithFallback(`/repositories/${repoId}/files`, MOCK_FILE_TREE);
+    return fetchClient.get<FileNode[]>(`/repositories/${repoId}/tree`);
   },
+
+  getFileContent: async (repoId: string, path: string): Promise<any> => {
+    return fetchClient.get<any>(`/repositories/${repoId}/files/content`, {
+      params: { path },
+    });
+  },
+
 
   // Memories
-  getMemories: async (userId: string = 'usr-admin-1'): Promise<MemoryRecord[]> => {
-    return fetchWithFallback(`/memory/user/${userId}`, MOCK_MEMORIES);
+  getMemories: async (_userId: string = 'usr-admin-1'): Promise<MemoryRecord[]> => {
+    try {
+      const res = await fetchClient.get<{ memories: any[] }>('/memory');
+      return (res.memories || []).map(mapMemoryResponse);
+    } catch (e) {
+      console.warn('Failed to fetch memories from backend:', e);
+      return MOCK_MEMORIES;
+    }
   },
 
   searchMemories: async (query: string, _userId: string = 'usr-admin-1'): Promise<MemoryRecord[]> => {
-    if (!query.trim()) return MOCK_MEMORIES;
-    const lower = query.toLowerCase();
-    return MOCK_MEMORIES.filter(m => m.content.toLowerCase().includes(lower) || m.memoryType.includes(lower));
+    if (!query.trim()) {
+      return api.getMemories(_userId);
+    }
+    try {
+      const res = await fetchClient.post<{ results: { memory: any }[] }>('/memory/search', {
+        query,
+      });
+      return (res.results || []).map(r => mapMemoryResponse(r.memory));
+    } catch (e) {
+      console.warn('Memory search backend call failed, filtering locally:', e);
+      const lower = query.toLowerCase();
+      return MOCK_MEMORIES.filter(m => m.content.toLowerCase().includes(lower) || m.memoryType.includes(lower));
+    }
   },
 
   deleteMemory: async (memoryId: string): Promise<boolean> => {
-    const idx = MOCK_MEMORIES.findIndex(m => m.id === memoryId);
-    if (idx !== -1) {
-      MOCK_MEMORIES.splice(idx, 1);
-    }
+    await fetchClient.delete(`/memory/${memoryId}`);
     return true;
   },
 
   // Tools
   getRegisteredTools: async (): Promise<ToolMetadata[]> => {
-    return fetchWithFallback('/tools', MOCK_TOOLS);
-  },
-
-  // Analytics & Health
-  getAnalytics: async (): Promise<AnalyticsMetrics> => {
-    return fetchWithFallback('/analytics', MOCK_ANALYTICS);
-  },
-
-  // Sessions & Agent Execution
-  getSessions: async (): Promise<ConversationSession[]> => {
-    return MOCK_SESSIONS;
-  },
-
-  executeAgentWorkflow: async (query: string, repoId: string): Promise<any> => {
     try {
-      const res = await fetch(`${API_BASE}/agents/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, repository_id: repoId })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Agent execution API call failed, generating simulated response', e);
+      return await fetchClient.get<ToolMetadata[]>('/tools');
+    } catch {
+      return MOCK_TOOLS;
     }
+  },
 
-    // Fallback simulation
+  // Analytics & Health (Simulated / Preview Platform Metrics)
+  getAnalytics: async (): Promise<AnalyticsMetrics> => {
+    return MOCK_ANALYTICS;
+  },
+
+  // Sessions & Conversations
+  getSessions: async (repoId?: string): Promise<ConversationSession[]> => {
+    try {
+      const params = repoId ? { repository_id: repoId } : undefined;
+      const res = await fetchClient.get<any[]>('/conversations', { params });
+      return res.map(s => ({
+        id: s.id,
+        title: s.title,
+        repositoryId: s.repositoryId || s.repository_id,
+        createdAt: s.createdAt || s.created_at,
+        updatedAt: s.updatedAt || s.updated_at,
+        messages: [],
+      }));
+    } catch (e) {
+      console.warn('Failed to fetch conversation sessions:', e);
+      return [];
+    }
+  },
+
+  getConversation: async (sessionId: string): Promise<ConversationSession | null> => {
+    try {
+      const res = await fetchClient.get<any>(`/conversations/${sessionId}`);
+      return {
+        id: res.id,
+        title: res.title,
+        repositoryId: res.repositoryId || res.repository_id,
+        createdAt: res.createdAt || res.created_at,
+        updatedAt: res.updatedAt || res.updated_at,
+        messages: (res.messages || []).map((m: any) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp || m.created_at || new Date().toISOString(),
+          agentTraces: m.agentTraces || m.agent_traces || [],
+          citations: m.citations || [],
+          toolCalls: m.toolCalls || m.tool_calls || [],
+        })),
+      };
+    } catch (e) {
+      console.warn(`Failed to fetch conversation ${sessionId}:`, e);
+      return null;
+    }
+  },
+
+  createConversation: async (data: { id?: string; title?: string; repository_id?: string }): Promise<ConversationSession> => {
+    const res = await fetchClient.post<any>('/conversations', data);
     return {
-      final_answer: `### Architecture Response for: "${query}"\n\nI have analyzed the repository context using our multi-agent workflow.\n\n1. **Context Agent**: Retrieved relevant code snippets from \`backend/src/application/agents/supervisor.py\`.\n2. **Code Analysis Agent**: Confirmed modular separation of domain interfaces.\n3. **Evaluation Agent**: Quality confidence score 0.98.`,
-      execution_trace: [
-        { agent: 'supervisor', action: 'routed_to_planner', latency_ms: 10 },
-        { agent: 'planner', action: 'plan_created', latency_ms: 180 },
-        { agent: 'context', action: 'rag_search_complete', latency_ms: 95 },
-        { agent: 'code_analysis', action: 'analysis_complete', latency_ms: 210 },
-        { agent: 'evaluation', action: 'quality_passed', latency_ms: 12 },
-        { agent: 'supervisor', action: 'synthesized_final_answer', latency_ms: 150 }
-      ]
+      id: res.id,
+      title: res.title,
+      repositoryId: res.repositoryId || res.repository_id,
+      createdAt: res.createdAt || res.created_at,
+      updatedAt: res.updatedAt || res.updated_at,
+      messages: res.messages || [],
     };
+  },
+
+  deleteConversation: async (sessionId: string): Promise<boolean> => {
+    try {
+      await fetchClient.delete(`/conversations/${sessionId}`);
+      return true;
+    } catch (e) {
+      console.warn(`Failed to delete conversation ${sessionId}:`, e);
+      return false;
+    }
+  },
+
+  saveChatMessage: async (
+    sessionId: string,
+    message: {
+      id?: string;
+      role: 'user' | 'assistant' | 'system';
+      content: string;
+      agentTraces?: any[];
+      citations?: any[];
+      toolCalls?: any[];
+    }
+  ): Promise<ChatMessage> => {
+    const res = await fetchClient.post<any>(`/conversations/${sessionId}/messages`, {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      agentTraces: message.agentTraces,
+      citations: message.citations,
+      toolCalls: message.toolCalls,
+    });
+    return {
+      id: res.id,
+      role: res.role,
+      content: res.content,
+      timestamp: res.timestamp || res.created_at || new Date().toISOString(),
+      agentTraces: res.agentTraces || [],
+      citations: res.citations || [],
+      toolCalls: res.toolCalls || [],
+    };
+  },
+
+  clearConversationMessages: async (sessionId: string): Promise<boolean> => {
+    try {
+      await fetchClient.delete(`/conversations/${sessionId}/messages`);
+      return true;
+    } catch (e) {
+      console.warn(`Failed to clear messages for conversation ${sessionId}:`, e);
+      return false;
+    }
+  },
+
+  executeAgentWorkflow: async (query: string, repoId: string, sessionId?: string): Promise<any> => {
+    try {
+      const res = await fetchClient.post<any>('/agents/execute', {
+        query,
+        repo_id: repoId,
+        session_id: sessionId,
+      });
+      return {
+        final_answer: res.answer || res.final_answer || '',
+        execution_trace: res.execution_trace || [],
+        citations: res.citations || [],
+        plan: res.plan,
+        agent_outputs: res.agent_outputs,
+        confidence_score: res.confidence_score,
+      };
+    } catch (e) {
+      console.warn('Agent execution API call failed:', e);
+      throw e;
+    }
   }
 };
+

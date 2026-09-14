@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Clock,
 } from 'lucide-react';
+import { FocusAura } from '../../components/ambient/FocusAura';
 
 type StrictnessLevel = 'low' | 'medium' | 'high';
 
@@ -271,7 +272,7 @@ export const CodeReviewPage: React.FC = () => {
       </div>
 
       {/* Repository Selector */}
-      <div className="glass-card p-5 rounded-2xl space-y-4">
+      <FocusAura area="review" className="glass-card p-5 rounded-2xl space-y-4">
         <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
           <GitBranch className="w-4 h-4 text-indigo-400" /> Repository &amp; Branch
         </h2>
@@ -318,10 +319,10 @@ export const CodeReviewPage: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+      </FocusAura>
 
       {/* Review Configuration */}
-      <div className="glass-card p-5 rounded-2xl space-y-5">
+      <FocusAura area="review" className="glass-card p-5 rounded-2xl space-y-5">
         <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
           <Settings2 className="w-4 h-4 text-indigo-400" /> Review Configuration
         </h2>
@@ -398,12 +399,13 @@ export const CodeReviewPage: React.FC = () => {
             />
           </div>
         </div>
-      </div>
+      </FocusAura>
 
       {/* Progress / Status */}
       {/* Progress / Status Card */}
       {status !== 'idle' && (
-        <div
+        <FocusAura
+          area="review"
           className={`glass-card p-5 rounded-2xl space-y-3 border ${
             status === 'error'
               ? 'border-rose-500/30 bg-rose-500/5'
@@ -492,7 +494,7 @@ export const CodeReviewPage: React.FC = () => {
               style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
             />
           </div>
-        </div>
+        </FocusAura>
       )}
 
 

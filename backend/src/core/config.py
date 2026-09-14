@@ -1,4 +1,6 @@
-from typing import List
+import json
+from typing import List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +16,46 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
 
     # ---- CORS ----
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        origins: List[str] = []
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        origins = [str(item).strip().rstrip("/") for item in parsed if item]
+                except Exception:
+                    pass
+            if not origins:
+                origins = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+        elif isinstance(v, list):
+            origins = [str(item).strip().rstrip("/") for item in v if item]
+
+        # Ensure both localhost:3000 and 127.0.0.1:3000 are present if either is configured
+        if "http://localhost:3000" in origins and "http://127.0.0.1:3000" not in origins:
+            origins.append("http://127.0.0.1:3000")
+        if "http://127.0.0.1:3000" in origins and "http://localhost:3000" not in origins:
+            origins.append("http://localhost:3000")
+        if "http://localhost:5173" in origins and "http://127.0.0.1:5173" not in origins:
+            origins.append("http://127.0.0.1:5173")
+        if "http://127.0.0.1:5173" in origins and "http://localhost:5173" not in origins:
+            origins.append("http://localhost:5173")
+
+        return list(dict.fromkeys(origins))
 
     # ---- Authentication ----
     SUPABASE_URL: str = ""
@@ -28,15 +69,16 @@ class Settings(BaseSettings):
     # ---- GitHub OAuth Integration ----
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
-    GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/github/callback"
-    FRONTEND_URL: str = "http://localhost:3000"
+    GITHUB_REDIRECT_URI: str = "http://127.0.0.1:8000/api/v1/integrations/github/callback"
+    FRONTEND_URL: str = "http://127.0.0.1:3000"
+
 
 
     # ---- LLM Providers ----
     GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     LLM_PROVIDER: str = "gemini"          # "gemini" | "openai"
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
     OPENAI_MODEL: str = "gpt-4o"
 
     # ---- RAG Pipeline ----

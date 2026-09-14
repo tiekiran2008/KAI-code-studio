@@ -4,7 +4,7 @@ export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 export type FixValidationStatus = 'pending' | 'valid' | 'invalid';
 export type FixUserDecision = 'pending' | 'accepted' | 'rejected';
-export type FixApplicationStatus = 'not_applied' | 'applying' | 'applied' | 'stale' | 'apply_failed';
+export type FixApplicationStatus = 'not_applied' | 'applying' | 'applied' | 'stale' | 'apply_failed' | 'rolled_back';
 export type VerificationStatus = 'not_run' | 'passed' | 'failed' | 'unsupported' | 'source_changed';
 export type SandboxVerificationStatus = 'not_run' | 'passed' | 'failed' | 'timed_out' | 'sandbox_unavailable' | 'execution_error' | 'unsupported' | 'source_changed';
 
@@ -272,15 +272,27 @@ export interface DependencyAnalysisResult {
 
 export interface ArchitectureData {
   architecture_findings: ArchitectureFinding[];
-  overall_health_score: number;
-  architecture_score: number;
-  maintainability_score: number;
-  technical_debt_score: number;
-  complexity_score: number;
-  documentation_score: number;
-  modularity_score: number;
-  testability_score: number;
+  overall_health_score: number | null;
+  architecture_score: number | null;
+  maintainability_score: number | null;
+  technical_debt_score: number | null;
+  complexity_score: number | null;
+  documentation_score: number | null;
+  modularity_score: number | null;
+  testability_score: number | null;
   dependency_analysis: DependencyAnalysisResult;
+}
+
+export interface CategoryAnalysisMetadata {
+  /** 'completed' = agent ran and produced output; 'not_evaluated' = disabled/skipped; 'failed' = agent errored */
+  status: 'completed' | 'not_evaluated' | 'failed';
+  findings_count: number;
+  /** Only present if the backend actually measured it */
+  files_analyzed?: number;
+  /** Only present if the backend actually measured it */
+  duration_ms?: number;
+  confidence?: number;
+  evaluated_at?: string | null;
 }
 
 export interface CodeReview {
@@ -308,15 +320,17 @@ export interface CodeReview {
   estimated_technical_debt_reduction?: number;
   estimated_complexity_reduction?: number;
   architecture_findings?: ArchitectureFinding[];
-  overall_health_score?: number;
-  architecture_score?: number;
-  maintainability_score?: number;
-  technical_debt_score?: number;
-  complexity_score?: number;
-  documentation_score?: number;
-  modularity_score?: number;
-  testability_score?: number;
+  overall_health_score?: number | null;
+  architecture_score?: number | null;
+  maintainability_score?: number | null;
+  technical_debt_score?: number | null;
+  complexity_score?: number | null;
+  documentation_score?: number | null;
+  modularity_score?: number | null;
+  testability_score?: number | null;
   dependency_analysis?: DependencyAnalysisResult;
+  /** Per-category analysis metadata keyed by category name (code_quality, security, performance, refactoring, architecture) */
+  category_metadata?: Record<string, CategoryAnalysisMetadata>;
   created_at: string;
   updated_at?: string;
 }
@@ -374,8 +388,20 @@ export const reviewsApi = {
     return fetchClient.delete(`/reviews/${id}`);
   },
 
-  async generateFix(reviewId: string, findingIndex: number): Promise<{ fix_suggestion: FixSuggestion; cached: boolean }> {
-    return fetchClient.post(`/reviews/${reviewId}/findings/${findingIndex}/fix`);
+  async generateFix(reviewId: string, findingIndex: number, force = false): Promise<{ fix_suggestion: FixSuggestion; cached: boolean }> {
+    return fetchClient.post(`/reviews/${reviewId}/findings/${findingIndex}/fix${force ? '?force=true' : ''}`);
+  },
+
+  async regenerateFix(reviewId: string, findingIndex: number): Promise<{ fix_suggestion: FixSuggestion; cached: boolean }> {
+    return fetchClient.post(`/reviews/${reviewId}/findings/${findingIndex}/fix/regenerate`);
+  },
+
+  async fixAllSafe(reviewId: string): Promise<{ results: Array<{ finding_index: number; fix_suggestion?: FixSuggestion; cached?: boolean; error?: string }>; total_processed: number }> {
+    return fetchClient.post(`/reviews/${reviewId}/findings/fix-all-safe`);
+  },
+
+  async fixBatch(reviewId: string, findingIndices?: number[]): Promise<{ results: Array<{ finding_index: number; fix_suggestion?: FixSuggestion; cached?: boolean; error?: string }>; total_processed: number }> {
+    return fetchClient.post(`/reviews/${reviewId}/findings/fix-batch`, { finding_indices: findingIndices });
   },
 
   async acceptFix(reviewId: string, findingIndex: number): Promise<{ fix_suggestion: FixSuggestion }> {
@@ -388,6 +414,10 @@ export const reviewsApi = {
 
   async applyFix(reviewId: string, findingIndex: number): Promise<{ fix_suggestion: FixSuggestion; idempotent: boolean }> {
     return fetchClient.post(`/reviews/${reviewId}/findings/${findingIndex}/fix/apply`);
+  },
+
+  async rollbackFix(reviewId: string, findingIndex: number): Promise<{ fix_suggestion: FixSuggestion; patch_result: any; rolled_back: boolean }> {
+    return fetchClient.post(`/reviews/${reviewId}/findings/${findingIndex}/fix/rollback`);
   },
 
   async verifyFix(reviewId: string, findingIndex: number): Promise<{ verification: StaticVerificationResult; fix_suggestion: FixSuggestion }> {

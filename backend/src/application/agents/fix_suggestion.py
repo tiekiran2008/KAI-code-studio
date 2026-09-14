@@ -185,19 +185,22 @@ class FixSuggestionAgent:
 
         # 1. Fetch Source Code Context (READ-ONLY)
         original_file_content = ""
+        clean_path = file_path.lstrip("/\\")
         if file_content_override is not None:
             original_file_content = file_content_override
         elif self.file_adapter:
-            res = await self.file_adapter.execute(action="read_file", path=file_path)
+            res = await self.file_adapter.execute(action="read_file", path=clean_path)
             if not res.success:
                 raise WorkflowExecutionError(f"Failed to read file '{file_path}': {res.error}")
             original_file_content = res.data.get("content", "")
         elif workspace_root:
             adapter = LocalFileSystemAdapter(workspace_root=workspace_root)
-            res = await adapter.execute(action="read_file", path=file_path)
+            res = await adapter.execute(action="read_file", path=clean_path)
             if not res.success:
                 raise WorkflowExecutionError(f"Failed to read file '{file_path}': {res.error}")
             original_file_content = res.data.get("content", "")
+        else:
+            raise WorkflowExecutionError(f"Cannot read file '{file_path}': No workspace root or file adapter configured for repository '{repository_id}'")
 
         original_snippet = self.extract_source_window(
             file_content=original_file_content,

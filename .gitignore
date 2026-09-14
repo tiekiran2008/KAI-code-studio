@@ -19,6 +19,9 @@ frontend/.env.*
 *.db
 agent_db.sqlite
 qdrant_db_local/
+backend/workspace/
+workspace/
+*.txt
 
 # =============================================================================
 # Python & Virtual Environments

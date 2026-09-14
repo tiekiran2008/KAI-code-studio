@@ -83,10 +83,22 @@ describe('ArchitectureTab Component', () => {
     expect(screen.getByText('Decouple domain model using mapping interface.')).toBeInTheDocument();
   });
 
-  it('renders empty state message when no findings are passed', () => {
-    render(<ArchitectureTab findings={[]} />);
-    expect(
-      screen.getByText('No architecture or code quality issues found. Codebase maintains high architectural integrity!')
-    ).toBeInTheDocument();
+  it('renders clean state message when evaluated with 100% health and zero findings', () => {
+    render(<ArchitectureTab findings={[]} overallHealthScore={100.0} />);
+    expect(screen.getByTestId('category-passed-architecture')).toBeInTheDocument();
+    expect(screen.getByText(/Architecture Analysis Passed/i)).toBeInTheDocument();
+  });
+
+  it('renders Not Evaluated message and N/A rings when architecture analysis was not run', () => {
+    render(
+      <ArchitectureTab
+        findings={[]}
+        overallHealthScore={null}
+        categoryMetadata={{ status: 'not_evaluated', findings_count: 0 }}
+      />
+    );
+    expect(screen.getByTestId('category-not-evaluated-architecture')).toBeInTheDocument();
+    expect(screen.getByText('Not Evaluated')).toBeInTheDocument();
+    expect(screen.getAllByText('N/A').length).toBe(8);
   });
 });

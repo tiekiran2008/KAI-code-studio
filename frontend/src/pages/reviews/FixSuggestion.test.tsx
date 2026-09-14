@@ -76,7 +76,7 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
     vi.clearAllMocks();
   });
 
-  it('renders "Generate Fix" for un-fixed findings and "View Fix" for persisted suggestions', async () => {
+  it('renders "Auto Fix" for un-fixed findings and "View Fix" for persisted suggestions', async () => {
     vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(mockCompletedReview);
 
     renderReviewResultsPage();
@@ -85,15 +85,15 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
       expect(screen.getByText('SQL injection risk in user query')).toBeInTheDocument();
     });
 
-    // Finding 0 has no fix_suggestion -> shows "Generate Fix"
-    expect(screen.getByRole('button', { name: /Generate Fix/i })).toBeInTheDocument();
+    // Finding 0 has no fix_suggestion -> shows "Auto Fix"
+    expect(screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i })).toBeInTheDocument();
 
     // Finding 1 has persisted fix_suggestion -> shows "View Fix" and "Accepted" badge
     expect(screen.getByRole('button', { name: /View Fix/i })).toBeInTheDocument();
     expect(screen.getByText('Accepted')).toBeInTheDocument();
   });
 
-  it('clicking Generate Fix invokes API and automatically opens FixSuggestionModal', async () => {
+  it('clicking Auto Fix invokes API and automatically opens FixSuggestionModal', async () => {
     vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(mockCompletedReview);
     vi.spyOn(reviewsApi, 'generateFix').mockResolvedValueOnce({
       fix_suggestion: mockGeneratedFix,
@@ -103,23 +103,26 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
     renderReviewResultsPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Generate Fix/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i })).toBeInTheDocument();
     });
 
-    const generateBtn = screen.getByRole('button', { name: /Generate Fix/i });
+    const generateBtn = screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i });
     fireEvent.click(generateBtn);
 
     await waitFor(() => {
       expect(reviewsApi.generateFix).toHaveBeenCalledWith('rev-test-101', 0);
-      // Modal should open with the generated fix
-      expect(screen.getByText('Automated Fix Suggestion')).toBeInTheDocument();
-      expect(screen.getByText(/Replaced f-string query/i)).toBeInTheDocument();
+    });
+
+    // FixSuggestionModal should be opened with the generated fix
+    await waitFor(() => {
+      // Explanation is shown inside the modal
+      expect(screen.getAllByText(/Replaced f-string query with parameterized SQLAlchemy expression/i).length).toBeGreaterThanOrEqual(1);
     });
   });
 
   it('clicking View Fix on persisted suggestion opens modal without calling generateFix', async () => {
     vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(mockCompletedReview);
-    const generateSpy = vi.spyOn(reviewsApi, 'generateFix');
+    const generateFixSpy = vi.spyOn(reviewsApi, 'generateFix');
 
     renderReviewResultsPage();
 
@@ -127,42 +130,54 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
       expect(screen.getByRole('button', { name: /View Fix/i })).toBeInTheDocument();
     });
 
-    const viewBtn = screen.getByRole('button', { name: /View Fix/i });
-    fireEvent.click(viewBtn);
+    const viewFixBtn = screen.getByRole('button', { name: /View Fix/i });
+    fireEvent.click(viewFixBtn);
 
-    expect(screen.getByText('Automated Fix Suggestion')).toBeInTheDocument();
-    expect(screen.getByText(/Removed unused import os/i)).toBeInTheDocument();
-    // Verify generateFix was NOT called
-    expect(generateSpy).not.toHaveBeenCalled();
+    // Should open modal immediately without API call
+    expect(generateFixSpy).not.toHaveBeenCalled();
+    expect(screen.getAllByText('Removed unused import os.').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/src\/utils\/helpers\.py:1/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('displays inline error when fix generation fails without breaking finding list', async () => {
     vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(mockCompletedReview);
     vi.spyOn(reviewsApi, 'generateFix').mockRejectedValueOnce(
-      new Error('LLM quota exceeded: 429 RESOURCE_EXHAUSTED')
+      new Error('AI generation service timeout')
     );
 
     renderReviewResultsPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Generate Fix/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i })).toBeInTheDocument();
     });
 
-    const generateBtn = screen.getByRole('button', { name: /Generate Fix/i });
+    const generateBtn = screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i });
     fireEvent.click(generateBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/LLM quota exceeded: 429 RESOURCE_EXHAUSTED/i)).toBeInTheDocument();
+      expect(screen.getByText('AI generation service timeout')).toBeInTheDocument();
     });
 
-    // Both findings remain intact
+    // The findings list is still intact
     expect(screen.getByText('SQL injection risk in user query')).toBeInTheDocument();
     expect(screen.getByText('Unused import os')).toBeInTheDocument();
   });
 
   it('maintains independent state across multiple findings', async () => {
     vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(mockCompletedReview);
+    vi.spyOn(reviewsApi, 'generateFix').mockResolvedValueOnce({
+      fix_suggestion: mockGeneratedFix,
+      cached: false,
+    });
 
+    renderReviewResultsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('SQL injection risk in user query')).toBeInTheDocument();
+    });
+
+    // Finding 0 is in un-fixed state
+    expect(screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i })).toBeInTheDocument();
     renderReviewResultsPage();
 
     await waitFor(() => {
@@ -171,7 +186,7 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
     });
 
     // Finding 0: pending generation
-    expect(screen.getByRole('button', { name: /Generate Fix/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /(Auto Fix|Generate Fix)/i })).toBeInTheDocument();
     // Finding 1: already accepted
     expect(screen.getByRole('button', { name: /View Fix/i })).toBeInTheDocument();
   });
@@ -282,7 +297,8 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
 
     await waitFor(() => {
       expect(screen.getByText('0 Findings')).toBeInTheDocument();
-      expect(screen.getByText('No code quality issues found.')).toBeInTheDocument();
+      expect(screen.getByTestId('category-passed-code_quality')).toBeInTheDocument();
+      expect(screen.getByText(/Code Quality Analysis Passed/i)).toBeInTheDocument();
     });
   });
 
@@ -329,5 +345,32 @@ describe('ReviewResultsPage Fix Suggestion End-to-End Interactions', () => {
     expect(screen.getByTestId('fix-workflow-stepper-compact')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it('renders "Manual Fix Required" badge for findings without file_path', async () => {
+    const reviewWithNonFixable: CodeReview = {
+      ...mockCompletedReview,
+      findings: [
+        {
+          issue: 'General architecture suggestion',
+          severity: 'info',
+          explanation: 'Consider breaking down services.',
+          file_path: '',
+          line_number: undefined,
+          suggested_fix: 'Refactor code',
+          confidence_score: 0.8,
+          fix_suggestion: null,
+        },
+      ],
+    };
+    vi.spyOn(reviewsApi, 'getReview').mockResolvedValueOnce(reviewWithNonFixable);
+    renderReviewResultsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('General architecture suggestion')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Manual Fix Required')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /(Auto Fix|Generate Fix)/i })).not.toBeInTheDocument();
   });
 });

@@ -6,7 +6,8 @@ from src.application.services.project_service import ProjectService
 from src.domain.entities.project import ProjectCreate, ProjectUpdate, ProjectStatus
 
 
-def _make_db_project(id="proj-1", user_id="user-123", name="My Project", status="active", repos=None):
+def _make_db_project(id="proj-1", user_id="user-123", name="My Project", status="active",
+                     repos=None, created_at=None, updated_at=None):
     db_p = MagicMock()
     db_p.id = id
     db_p.user_id = user_id
@@ -15,8 +16,8 @@ def _make_db_project(id="proj-1", user_id="user-123", name="My Project", status=
     db_p.description = "Project desc"
     db_p.status = status
     db_p.repositories = repos or []
-    db_p.created_at = datetime.now(timezone.utc)
-    db_p.updated_at = datetime.now(timezone.utc)
+    db_p.created_at = created_at if created_at is not None else datetime.now(timezone.utc)
+    db_p.updated_at = updated_at if updated_at is not None else datetime.now(timezone.utc)
     return db_p
 
 
@@ -58,3 +59,59 @@ class TestProjectService:
 
         self.service.link_repository(self.user_id, "proj-1", "repo-1")
         self.mock_p_repo.link_repository.assert_called_once_with("proj-1", "repo-1")
+
+    # ── Regression tests: NULL updated_at / created_at (the production 500 cause) ──
+
+    def test_to_entity_with_null_updated_at(self):
+        """_to_entity must not raise when db row has updated_at=None (legacy data)."""
+        db_p = _make_db_project(user_id=self.user_id, updated_at=None)
+        entity = self.service._to_entity(db_p, self.user_id)
+        assert entity.updated_at is not None
+        assert entity.id == "proj-1"
+        assert entity.status == ProjectStatus.ACTIVE
+
+    def test_to_entity_with_null_created_at(self):
+        """_to_entity must not raise when both created_at and updated_at are None."""
+        db_p = _make_db_project(user_id=self.user_id, created_at=None, updated_at=None)
+        entity = self.service._to_entity(db_p, self.user_id)
+        assert entity.created_at is not None
+        assert entity.updated_at is not None
+
+    def test_to_entity_with_null_status(self):
+        """_to_entity must default status to ACTIVE when status is None."""
+        db_p = _make_db_project(user_id=self.user_id, status=None)
+        entity = self.service._to_entity(db_p, self.user_id)
+        assert entity.status == ProjectStatus.ACTIVE
+
+    def test_to_entity_with_empty_string_status(self):
+        """_to_entity must default status to ACTIVE when status is empty string."""
+        db_p = _make_db_project(user_id=self.user_id, status="")
+        entity = self.service._to_entity(db_p, self.user_id)
+        assert entity.status == ProjectStatus.ACTIVE
+
+    def test_to_entity_with_unknown_status(self):
+        """_to_entity must gracefully handle unexpected status values."""
+        db_p = _make_db_project(user_id=self.user_id, status="UNKNOWN_STATUS")
+        entity = self.service._to_entity(db_p, self.user_id)
+        assert entity.status == ProjectStatus.ACTIVE
+
+    def test_to_entity_with_archived_status_casing(self):
+        """_to_entity handles ARCHIVED/Archived/archived variations."""
+        for s in ("ARCHIVED", "Archived", "archived"):
+            db_p = _make_db_project(user_id=self.user_id, status=s)
+            entity = self.service._to_entity(db_p, self.user_id)
+            assert entity.status == ProjectStatus.ARCHIVED, f"Failed for status={s!r}"
+
+    def test_list_projects_with_null_updated_at(self):
+        """list_projects must succeed even when all projects have updated_at=None."""
+        db_projects = [
+            _make_db_project(id=f"proj-{i}", user_id=self.user_id, updated_at=None)
+            for i in range(3)
+        ]
+        self.mock_p_repo.list_by_user.return_value = db_projects
+
+        result = self.service.list_projects(self.user_id)
+        assert len(result) == 3
+        for p in result:
+            assert p.updated_at is not None
+

@@ -472,12 +472,14 @@ describe('FixSuggestionModal Component', () => {
     expect(screen.queryByRole('button', { name: /Apply Suggestion/i })).not.toBeInTheDocument();
   });
 
-  it('36. Invalid validation status: Apply Suggestion button is unavailable', () => {
-    const invalidFix: FixSuggestion = {
+  it('37. Regenerate fix: calls regenerateFix when Regenerate button is clicked', async () => {
+    const mockOnDecisionChange = vi.fn();
+    const regeneratedFix: FixSuggestion = {
       ...sampleFix,
-      user_decision: 'accepted',
-      validation_status: 'invalid',
+      proposed_code: 'def add(a, b):\n    # regenerated\n    return a + b',
+      explanation: 'Regenerated fix without unused temp variable.',
     };
+    vi.spyOn(reviewsApi, 'regenerateFix').mockResolvedValueOnce({ fix_suggestion: regeneratedFix, cached: false });
 
     render(
       <FixSuggestionModal
@@ -486,12 +488,62 @@ describe('FixSuggestionModal Component', () => {
         reviewId="rev-123"
         findingIndex={0}
         finding={sampleFinding}
-        fixSuggestion={invalidFix}
-        onDecisionChange={vi.fn()}
+        fixSuggestion={sampleFix}
+        onDecisionChange={mockOnDecisionChange}
       />
     );
 
-    expect(screen.queryByRole('button', { name: /Apply Suggestion/i })).not.toBeInTheDocument();
+    const regenBtn = screen.getByRole('button', { name: /Regenerate/i });
+    fireEvent.click(regenBtn);
+
+    await waitFor(() => {
+      expect(reviewsApi.regenerateFix).toHaveBeenCalledWith('rev-123', 0);
+      expect(mockOnDecisionChange).toHaveBeenCalledWith(regeneratedFix);
+    });
+  });
+
+  it('38. Rollback fix: opens confirmation modal and calls rollbackFix when confirmed', async () => {
+    const mockOnDecisionChange = vi.fn();
+    const appliedFix: FixSuggestion = {
+      ...sampleFix,
+      user_decision: 'accepted',
+      application_status: 'applied',
+      applied_at: '2026-08-25T09:00:00Z',
+    };
+    const rolledBackFix: FixSuggestion = {
+      ...appliedFix,
+      application_status: 'rolled_back',
+    };
+    vi.spyOn(reviewsApi, 'rollbackFix').mockResolvedValueOnce({
+      fix_suggestion: rolledBackFix,
+      patch_result: { success: true, files_changed: 1 },
+      rolled_back: true,
+    });
+
+    render(
+      <FixSuggestionModal
+        isOpen={true}
+        onClose={vi.fn()}
+        reviewId="rev-123"
+        findingIndex={0}
+        finding={sampleFinding}
+        fixSuggestion={appliedFix}
+        onDecisionChange={mockOnDecisionChange}
+      />
+    );
+
+    const rollbackBtn = screen.getByRole('button', { name: /Rollback Fix/i });
+    fireEvent.click(rollbackBtn);
+
+    expect(screen.getByText(/Rollback Applied Fix/i)).toBeInTheDocument();
+
+    const confirmRollbackBtn = screen.getByRole('button', { name: /Confirm Rollback/i });
+    fireEvent.click(confirmRollbackBtn);
+
+    await waitFor(() => {
+      expect(reviewsApi.rollbackFix).toHaveBeenCalledWith('rev-123', 0);
+      expect(mockOnDecisionChange).toHaveBeenCalledWith(rolledBackFix);
+    });
   });
 });
 

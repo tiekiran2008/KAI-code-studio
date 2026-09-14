@@ -23,11 +23,12 @@ interface GitHubPickerProps {
 const GitHubRepoPicker: React.FC<GitHubPickerProps> = ({ onSelect, onConnectRequest }) => {
   const {
     status, isStatusLoading, fetchStatus,
-    repositories, isReposLoading, reposError, hasMore,
-    fetchRepositories, loadMoreRepositories, setReposSearch, resetRepos,
+    repositories, isReposLoading, reposError, hasMore, isExpired, isDisconnecting,
+    fetchRepositories, loadMoreRepositories, setReposSearch, resetRepos, disconnect,
   } = useGitHubStore();
 
   const [search, setSearch] = useState('');
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -54,6 +55,11 @@ const GitHubRepoPicker: React.FC<GitHubPickerProps> = ({ onSelect, onConnectRequ
     },
     [fetchRepositories, setReposSearch],
   );
+
+  const handleConfirmDisconnect = async () => {
+    await disconnect();
+    setShowDisconnectConfirm(false);
+  };
 
   if (isStatusLoading) {
     return (
@@ -88,17 +94,98 @@ const GitHubRepoPicker: React.FC<GitHubPickerProps> = ({ onSelect, onConnectRequ
 
   return (
     <div className="space-y-3">
-      {/* Connected badge */}
-      <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/20">
-        {status.avatar_url && (
-          <img src={status.avatar_url} alt={status.username || ''} className="w-7 h-7 rounded-full" />
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Connected as <span className="font-mono">{status.username}</span>
-          </p>
+      {/* Expired Token Alert */}
+      {isExpired && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-amber-200">Your GitHub connection has expired.</p>
+              <p className="text-[11px] text-amber-300/80 mt-0.5">
+                Your authorization token is no longer valid or has been revoked on GitHub. Please reconnect GitHub to continue browsing your repositories.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onConnectRequest}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-glow"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Reconnect GitHub
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDisconnectConfirm(true)}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Connected badge & Disconnect Button */}
+      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/20">
+        <div className="flex items-center gap-3 min-w-0">
+          {status.avatar_url && (
+            <img src={status.avatar_url} alt={status.username || ''} className="w-7 h-7 rounded-full border border-emerald-500/40 shrink-0" />
+          )}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5 truncate">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Connected as <span className="font-mono">{status.username}</span>
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          id="btn-disconnect-github-picker"
+          onClick={() => setShowDisconnectConfirm(true)}
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-950/40 border border-rose-500/30 hover:bg-rose-900/50 text-rose-300 hover:text-rose-200 text-xs font-medium transition-all"
+          title="Disconnect GitHub account"
+        >
+          <Link2Off className="w-3 h-3" /> Disconnect GitHub
+        </button>
       </div>
+
+      {/* Disconnect Confirmation Modal / Dialog */}
+      {showDisconnectConfirm && (
+        <div className="p-4 rounded-xl bg-slate-900 border border-rose-500/40 text-xs space-y-3 animate-in fade-in">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-white">Disconnect GitHub account?</p>
+              <p className="text-slate-400 text-[11px] mt-0.5">
+                This will safely remove your stored GitHub access token and connection metadata. Your existing imported repositories and projects will not be deleted.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDisconnectConfirm(false)}
+              disabled={isDisconnecting}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              id="btn-confirm-disconnect"
+              onClick={handleConfirmDisconnect}
+              disabled={isDisconnecting}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-glow disabled:opacity-50"
+            >
+              {isDisconnecting ? (
+                <><Loader2 className="w-3 h-3 animate-spin" /> Disconnecting…</>
+              ) : (
+                <><Link2Off className="w-3 h-3" /> Confirm Disconnect</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative">
@@ -112,8 +199,8 @@ const GitHubRepoPicker: React.FC<GitHubPickerProps> = ({ onSelect, onConnectRequ
         />
       </div>
 
-      {/* Repo list */}
-      {reposError && (
+      {/* Repo list error */}
+      {reposError && !isExpired && (
         <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" /> {reposError}
         </div>
@@ -125,7 +212,7 @@ const GitHubRepoPicker: React.FC<GitHubPickerProps> = ({ onSelect, onConnectRequ
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading repositories…
           </div>
         )}
-        {!isReposLoading && repositories.length === 0 && (
+        {!isReposLoading && repositories.length === 0 && !isExpired && (
           <div className="py-8 text-center text-slate-500 text-xs">
             No repositories found{search ? ` for "${search}"` : ''}.
           </div>

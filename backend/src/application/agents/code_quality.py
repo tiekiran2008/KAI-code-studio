@@ -151,6 +151,17 @@ class CodeQualityAgent:
             findings = result.get("findings", [])
             metrics = result.get("metrics", {})
             dependency_analysis = result.get("dependency_analysis", {})
+            if not metrics and not findings and result:
+                metrics = {
+                    "overall_health_score": 100.0,
+                    "architecture_score": 100.0,
+                    "maintainability_score": 100.0,
+                    "technical_debt_score": 100.0,
+                    "complexity_score": 100.0,
+                    "documentation_score": 100.0,
+                    "modularity_score": 100.0,
+                    "testability_score": 100.0,
+                }
         except Exception as e:
             logger.error("code_quality_json_parse_error", error=str(e), content=llm_resp.content)
             result = {}

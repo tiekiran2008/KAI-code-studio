@@ -4,7 +4,13 @@ import {
   ArchitectureCategory,
   FindingSeverity,
   DependencyAnalysisResult,
+  CategoryAnalysisMetadata,
+  CodeReview,
 } from '../../api/reviews';
+import {
+  CategoryStatusCard,
+  FindingSeverityCounts,
+} from './CategoryStatusCard';
 import {
   Search,
   Filter,
@@ -30,6 +36,8 @@ export interface ArchitectureTabProps {
   modularityScore?: number | null;
   testabilityScore?: number | null;
   dependencyAnalysis?: DependencyAnalysisResult;
+  reviewStatus?: CodeReview['status'];
+  categoryMetadata?: CategoryAnalysisMetadata;
 }
 
 // ─── Severity badge ──────────────────────────────────────────────────────────
@@ -63,7 +71,31 @@ const SeverityBadge: React.FC<{ severity: FindingSeverity }> = ({ severity }) =>
 
 // ─── Metric Score Ring ─────────────────────────────────────────────────────
 
-const ScoreRing: React.FC<{ score: number; label: string }> = ({ score, label }) => {
+const ScoreRing: React.FC<{ score: number | null | undefined; label: string }> = ({ score, label }) => {
+  if (score === null || score === undefined) {
+    return (
+      <div className="flex flex-col items-center justify-center">
+        <div className="relative w-24 h-24">
+          <svg className="transform -rotate-90 w-24 h-24" viewBox="0 0 100 100">
+            <circle
+              className="text-slate-800"
+              strokeWidth="6"
+              stroke="currentColor"
+              fill="none"
+              r={40}
+              cx="50"
+              cy="50"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-sm font-semibold text-slate-500">N/A</span>
+          </div>
+        </div>
+        <span className="text-[11px] font-semibold text-slate-400 mt-2 text-center">{label}</span>
+      </div>
+    );
+  }
+
   const rounded = Math.round(score);
   let colorClass = 'stroke-emerald-400 text-emerald-400';
   if (rounded < 60) colorClass = 'stroke-rose-400 text-rose-400';
@@ -193,15 +225,17 @@ const ArchitectureFindingCard: React.FC<{
 
 export const ArchitectureTab: React.FC<ArchitectureTabProps> = ({
   findings = [],
-  overallHealthScore = 85.0,
-  architectureScore = 88.0,
-  maintainabilityScore = 80.0,
-  technicalDebtScore = 78.0,
-  complexityScore = 82.0,
-  documentationScore = 85.0,
-  modularityScore = 84.0,
-  testabilityScore = 86.0,
+  overallHealthScore = null,
+  architectureScore = null,
+  maintainabilityScore = null,
+  technicalDebtScore = null,
+  complexityScore = null,
+  documentationScore = null,
+  modularityScore = null,
+  testabilityScore = null,
   dependencyAnalysis,
+  reviewStatus = 'completed',
+  categoryMetadata,
 }) => {
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState<ArchitectureCategory | 'all'>('all');
@@ -211,17 +245,25 @@ export const ArchitectureTab: React.FC<ArchitectureTabProps> = ({
   const [page, setPage] = useState(0);
   const PAGE = 10;
 
-  const health = overallHealthScore ?? 85.0;
-  const arch = architectureScore ?? 88.0;
-  const maint = maintainabilityScore ?? 80.0;
-  const debt = technicalDebtScore ?? 78.0;
-  const comp = complexityScore ?? 82.0;
-  const doc = documentationScore ?? 85.0;
-  const mod = modularityScore ?? 84.0;
-  const test = testabilityScore ?? 86.0;
+  const health = overallHealthScore;
+  const arch = architectureScore;
+  const maint = maintainabilityScore;
+  const debt = technicalDebtScore;
+  const comp = complexityScore;
+  const doc = documentationScore;
+  const mod = modularityScore;
+  const test = testabilityScore;
 
   const layerViolations = dependencyAnalysis?.layer_violations || [];
   const hotspotFiles = dependencyAnalysis?.hotspot_files || [];
+
+  const severityCounts = useMemo(() => {
+    const counts: FindingSeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => {
+      if (f.severity in counts) counts[f.severity as keyof FindingSeverityCounts]++;
+    });
+    return counts;
+  }, [findings]);
 
   const filtered = useMemo(() => {
     let list = [...findings];
@@ -354,102 +396,124 @@ export const ArchitectureTab: React.FC<ArchitectureTabProps> = ({
         </div>
       )}
 
-      {/* Findings List Section */}
+      {/* Findings Section */}
       <div className="glass-panel p-6 rounded-2xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-            <FileCode2 className="w-4 h-4 text-indigo-400" /> Architecture & Code Quality Findings ({filtered.length})
-          </h2>
-        </div>
+        {findings.length > 0 && (
+          <CategoryStatusCard
+            categoryKey="architecture"
+            reviewStatus={reviewStatus}
+            metadata={categoryMetadata}
+            findingsCount={findings.length}
+            severityCounts={severityCounts}
+          />
+        )}
 
-        {/* Filters row */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search architecture & quality findings…"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-              }}
-              className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
+        {findings.length > 0 && (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                  <FileCode2 className="w-4 h-4 text-indigo-400" /> Architecture & Maintainability Findings
+                  <span className="text-xs text-slate-500 font-mono">({filtered.length})</span>
+                </h3>
+              </div>
+            </div>
 
-          <div className="relative">
-            <Filter className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-            <select
-              value={catFilter}
-              onChange={(e) => {
-                setCatFilter(e.target.value as ArchitectureCategory | 'all');
-                setPage(0);
-              }}
-              className="pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 appearance-none"
-            >
-              <option value="all">All Categories</option>
-              <option value="architecture">Architecture</option>
-              <option value="clean_architecture">Clean Architecture</option>
-              <option value="coupling">Coupling</option>
-              <option value="cohesion">Cohesion</option>
-              <option value="solid">SOLID Violations</option>
-              <option value="patterns">Design Patterns</option>
-              <option value="technical_debt">Technical Debt</option>
-              <option value="complexity">Complexity</option>
-              <option value="documentation">Documentation</option>
-              <option value="testability">Testability</option>
-              <option value="layer_violation">Layer Violation</option>
-              <option value="modularity">Modularity</option>
-            </select>
-          </div>
+            {/* Filter controls */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(0);
+                  }}
+                  placeholder="Search architecture & quality findings..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
 
-          <div className="relative">
-            <Filter className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-            <select
-              value={sevFilter}
-              onChange={(e) => {
-                setSevFilter(e.target.value as FindingSeverity | 'all');
-                setPage(0);
-              }}
-              className="pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 appearance-none"
-            >
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="info">Info</option>
-            </select>
-          </div>
+              <div className="relative">
+                <Filter className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+                <select
+                  value={catFilter}
+                  onChange={(e) => {
+                    setCatFilter(e.target.value as ArchitectureCategory | 'all');
+                    setPage(0);
+                  }}
+                  className="pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 appearance-none capitalize"
+                >
+                  <option value="all">All Categories</option>
+                  <option value="clean_architecture">Clean Architecture</option>
+                  <option value="coupling">Coupling</option>
+                  <option value="cohesion">Cohesion</option>
+                  <option value="solid">SOLID</option>
+                  <option value="patterns">Design Patterns</option>
+                  <option value="technical_debt">Tech Debt</option>
+                  <option value="complexity">Complexity</option>
+                  <option value="documentation">Documentation</option>
+                  <option value="testability">Testability</option>
+                  <option value="layer_violation">Layer Violation</option>
+                  <option value="modularity">Modularity</option>
+                </select>
+              </div>
 
-          <div className="flex gap-2">
-            {(['severity', 'effort', 'confidence', 'file'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => toggleSort(f)}
-                className={`flex items-center gap-1 px-3 py-2 rounded-xl text-[11px] font-medium border transition-all ${
-                  sortField === f
-                    ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
-                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                <ArrowUpDown className="w-3 h-3" />
-                {f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
+              <div className="relative">
+                <Filter className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+                <select
+                  value={sevFilter}
+                  onChange={(e) => {
+                    setSevFilter(e.target.value as FindingSeverity | 'all');
+                    setPage(0);
+                  }}
+                  className="pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 appearance-none"
+                >
+                  <option value="all">All Severities</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                  <option value="info">Info</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2">
+                {(['severity', 'effort', 'confidence', 'file'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => toggleSort(f)}
+                    className={`flex items-center gap-1 px-3 py-2 rounded-xl text-[11px] font-medium border transition-all ${
+                      sortField === f
+                        ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
+                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <ArrowUpDown className="w-3 h-3" />
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Findings List */}
         <div className="space-y-3">
-          {paginated.length === 0 ? (
+          {findings.length === 0 ? (
+            <CategoryStatusCard
+              categoryKey="architecture"
+              reviewStatus={reviewStatus}
+              metadata={categoryMetadata}
+              findingsCount={0}
+              severityCounts={severityCounts}
+            />
+          ) : paginated.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400 space-y-2">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+              <Layers className="w-10 h-10 text-slate-600" />
               <p className="text-sm font-medium text-slate-300">
-                {findings.length === 0
-                  ? 'No architecture or code quality issues found. Codebase maintains high architectural integrity!'
-                  : 'No findings match your selected search or filter criteria.'}
+                No findings match your selected search or filter criteria.
               </p>
             </div>
           ) : (

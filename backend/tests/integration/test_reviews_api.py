@@ -60,6 +60,7 @@ def mock_repo_service():
     repo = MagicMock()
     repo.id = "repo_123"
     repo.user_id = "test_user_id"
+    repo.indexing_status = "indexed"
     service.get_repository.return_value = repo
     return service
 

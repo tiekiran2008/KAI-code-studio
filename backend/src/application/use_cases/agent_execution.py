@@ -119,7 +119,29 @@ class ExecuteAgentWorkflowUseCase:
                         if isinstance(event, dict):
                             for node_name, node_state in event.items():
                                 if isinstance(node_state, dict):
-                                    final_state.update(node_state)
+                                    for k, v in node_state.items():
+                                        if k == "agent_outputs" and isinstance(v, dict):
+                                            if not isinstance(final_state.get("agent_outputs"), dict):
+                                                final_state["agent_outputs"] = {}
+                                            final_state["agent_outputs"].update(v)
+                                        elif k == "execution_trace" and isinstance(v, list):
+                                            if not isinstance(final_state.get("execution_trace"), list):
+                                                final_state["execution_trace"] = []
+                                            final_state["execution_trace"].extend(v)
+                                        elif k == "errors" and isinstance(v, list):
+                                            if not isinstance(final_state.get("errors"), list):
+                                                final_state["errors"] = []
+                                            final_state["errors"].extend(v)
+                                        elif k == "retrieved_chunks" and isinstance(v, list):
+                                            if not isinstance(final_state.get("retrieved_chunks"), list):
+                                                final_state["retrieved_chunks"] = []
+                                            final_state["retrieved_chunks"].extend(v)
+                                        elif k == "citations" and isinstance(v, list):
+                                            if not isinstance(final_state.get("citations"), list):
+                                                final_state["citations"] = []
+                                            final_state["citations"].extend(v)
+                                        else:
+                                            final_state[k] = v
                                 if node_name == "planner":
                                     await on_progress("planning", 20, "Planner agent created execution plan…")
                                 elif node_name == "context":
@@ -145,6 +167,39 @@ class ExecuteAgentWorkflowUseCase:
             )
 
             # ---- Phase 7: Persist episodic memory ----
+            raw_answer = final_state.get("final_answer", "No answer generated.")
+            existing_citations = final_state.get("citations", [])
+            retrieved_chunks = final_state.get("retrieved_chunks", [])
+
+            from src.application.rag.citation_validator import CitationValidator
+            validator = CitationValidator()
+            val_res = validator.validate_and_reconcile(
+                answer=raw_answer,
+                chunks=retrieved_chunks,
+                existing_citations=existing_citations,
+            )
+
+            # Format structured citations for API response
+            reconciled_citations = [
+                {
+                    "file_path": c.file_path,
+                    "repo_path": c.repo_path,
+                    "class_name": c.class_name,
+                    "function_name": c.function_name,
+                    "start_line": c.start_line,
+                    "end_line": c.end_line,
+                    "symbol_type": c.symbol_type,
+                    "confidence": c.confidence,
+                    "chunk_id": c.chunk_id,
+                }
+                for c in val_res.verified_citations
+            ]
+
+            effective_confidence = max(
+                final_state.get("confidence_score", 0.0),
+                val_res.grounding_score if reconciled_citations else 0.85,
+            )
+
             if self._memory is not None and effective_user != "anonymous":
                 try:
                     await self._memory.save_episode(
@@ -153,21 +208,21 @@ class ExecuteAgentWorkflowUseCase:
                         query=query,
                         repository_id=repo_id,
                         agent_outputs=final_state.get("agent_outputs", {}),
-                        final_answer=final_state.get("final_answer", ""),
-                        confidence_score=final_state.get("confidence_score", 0.0),
-                        citations=final_state.get("citations", []),
+                        final_answer=raw_answer,
+                        confidence_score=effective_confidence,
+                        citations=reconciled_citations,
                         execution_trace=final_state.get("execution_trace", []),
                     )
                 except Exception as exc:
                     logger.warning("episodic_memory_save_failed", error=str(exc))
 
             return {
-                "answer": final_state.get("final_answer", "No answer generated."),
+                "answer": raw_answer,
                 "plan": final_state.get("plan", {}),
                 "agent_outputs": final_state.get("agent_outputs", {}),
-                "citations": final_state.get("citations", []),
-                "confidence_score": final_state.get("confidence_score", 0.0),
-                "groundedness_ratio": final_state.get("groundedness_ratio", 0.0),
+                "citations": reconciled_citations,
+                "confidence_score": effective_confidence,
+                "groundedness_ratio": val_res.grounding_score,
                 "execution_trace": final_state.get("execution_trace", []),
                 "latency_ms": total_latency,
                 "session_id": session_id or "agent_session",

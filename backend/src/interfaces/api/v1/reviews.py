@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, status
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from src.interfaces.api.dependencies import (
     get_agent_use_case,
     get_repository_service,
     get_apply_fix_use_case,
+    get_rollback_applied_fix_use_case,
     get_verify_applied_fix_use_case,
     get_verify_applied_fix_tests_use_case,
     get_commit_applied_fix_use_case,
@@ -25,15 +26,18 @@ from src.domain.entities.git import GitCommitResult, GitPushResult, GitPullReque
 from src.application.services.code_review_service import CodeReviewService
 from src.application.services.repository_service import RepositoryService
 from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
+from src.infrastructure.repositories.repository_repository import RepositoryRepository
 from src.application.use_cases.review_code import ReviewCodeUseCase
 from src.application.use_cases.agent_execution import ExecuteAgentWorkflowUseCase
 from src.application.use_cases.apply_fix import ApplyFixSuggestionUseCase
+from src.application.use_cases.rollback_applied_fix import RollbackAppliedFixUseCase
 from src.application.use_cases.verify_applied_fix import VerifyAppliedFixUseCase
 from src.application.use_cases.verify_applied_fix_tests import VerifyAppliedFixTestsUseCase
 from src.application.use_cases.commit_applied_fix import CommitAppliedFixUseCase
 from src.application.use_cases.push_fix_branch import PushFixBranchUseCase
 from src.application.use_cases.create_fix_pull_request import CreateFixPullRequestUseCase
 from src.core.config import settings
+from src.core.logger import logger
 
 # --- Dependency factories ---
 
@@ -105,15 +109,17 @@ class CodeReviewResponse(BaseModel):
     estimated_complexity_reduction: float = 0.0
     # Architecture
     architecture_findings: List[Dict] = Field(default_factory=list)
-    overall_health_score: float = 0.0
-    architecture_score: float = 0.0
-    maintainability_score: float = 0.0
-    technical_debt_score: float = 0.0
-    complexity_score: float = 0.0
-    documentation_score: float = 0.0
-    modularity_score: float = 0.0
-    testability_score: float = 0.0
+    overall_health_score: Optional[float] = None
+    architecture_score: Optional[float] = None
+    maintainability_score: Optional[float] = None
+    technical_debt_score: Optional[float] = None
+    complexity_score: Optional[float] = None
+    documentation_score: Optional[float] = None
+    modularity_score: Optional[float] = None
+    testability_score: Optional[float] = None
     dependency_analysis: Dict = Field(default_factory=dict)
+    # Per-category analysis execution metadata
+    category_metadata: Optional[Dict[str, Any]] = None
     # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -141,6 +147,14 @@ def _db_review_to_response(db_review: Any) -> CodeReviewResponse:
             return float(val) if val is not None else default
         return default
 
+    def _get_opt_float(attr: str) -> Optional[float]:
+        val = getattr(db_review, attr, None)
+        if val is None or hasattr(val, "_mock_name"):
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        return None
+
     def _get_list(attr: str) -> List[Dict]:
         val = getattr(db_review, attr, [])
         return val if isinstance(val, list) else []
@@ -161,7 +175,7 @@ def _db_review_to_response(db_review: Any) -> CodeReviewResponse:
         findings=_get_list("findings_json"),
         confidence_score=_get_float("confidence_score", 1.0),
         duration_ms=getattr(db_review, "duration_ms", None) if isinstance(getattr(db_review, "duration_ms", None), int) else None,
-        performance_score=getattr(db_review, "performance_score", None) if isinstance(getattr(db_review, "performance_score", None), (int, float)) else None,
+        performance_score=_get_opt_float("performance_score"),
         performance_findings=_get_list("performance_findings_json"),
         performance_recommendations=_get_list("performance_recommendations_json"),
         estimated_cpu_savings=_get_float("estimated_cpu_savings", 0.0),
@@ -174,15 +188,16 @@ def _db_review_to_response(db_review: Any) -> CodeReviewResponse:
         estimated_technical_debt_reduction=_get_float("estimated_technical_debt_reduction", 0.0),
         estimated_complexity_reduction=_get_float("estimated_complexity_reduction", 0.0),
         architecture_findings=_get_list("architecture_findings_json"),
-        overall_health_score=_get_float("overall_health_score", 0.0),
-        architecture_score=_get_float("architecture_score", 0.0),
-        maintainability_score=_get_float("maintainability_score", 0.0),
-        technical_debt_score=_get_float("technical_debt_score", 0.0),
-        complexity_score=_get_float("complexity_score", 0.0),
-        documentation_score=_get_float("documentation_score", 0.0),
-        modularity_score=_get_float("modularity_score", 0.0),
-        testability_score=_get_float("testability_score", 0.0),
+        overall_health_score=_get_opt_float("overall_health_score"),
+        architecture_score=_get_opt_float("architecture_score"),
+        maintainability_score=_get_opt_float("maintainability_score"),
+        technical_debt_score=_get_opt_float("technical_debt_score"),
+        complexity_score=_get_opt_float("complexity_score"),
+        documentation_score=_get_opt_float("documentation_score"),
+        modularity_score=_get_opt_float("modularity_score"),
+        testability_score=_get_opt_float("testability_score"),
         dependency_analysis=_get_dict("dependency_analysis_json"),
+        category_metadata=_get_dict("category_metadata_json") or None,
         created_at=getattr(db_review, "created_at", None) if not hasattr(getattr(db_review, "created_at", None), "_mock_name") else None,
         updated_at=getattr(db_review, "updated_at", None) if not hasattr(getattr(db_review, "updated_at", None), "_mock_name") else None,
     )
@@ -242,6 +257,15 @@ async def start_review(
     repo = repo_service.get_repository(user_id, request.repository_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
+
+    # Enforce repository indexing status
+    raw_status = getattr(repo, "indexing_status", None)
+    status_str = getattr(raw_status, "value", str(raw_status or "")).lower()
+    if status_str in ("failed", "indexing", "pending", "stale"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Repository indexing must complete before code review can start.",
+        )
 
     # Wire the use case with the injected, fully-configured agent executor
     use_case = ReviewCodeUseCase(
@@ -491,10 +515,29 @@ def get_architecture(
 # Phase 11.2B-3 — Fix Suggestion API endpoints
 # ---------------------------------------------------------------------------
 
+def _resolve_repo_workspace_root(repository_id: Optional[str], repo_service: Optional[RepositoryService]) -> Optional[str]:
+    """Safely resolve the on-disk workspace root directory for a repository ID."""
+    if not repository_id or not repo_service:
+        return None
+    try:
+        db_repo = repo_service.repo_repository.get_by_id(repository_id)
+        if db_repo:
+            repo_dir = repo_service._get_repo_dir(repository_id, db_repo)
+            if repo_dir.exists() and repo_dir.is_dir():
+                return str(repo_dir)
+    except Exception as exc:
+        logger.warning("failed_to_resolve_repo_workspace_root", repo_id=repository_id, error=str(exc))
+    return None
+
+
 def get_fix_suggestion_agent():
     """Dependency factory: builds a FixSuggestionAgent using the shared LLM provider."""
     from src.application.agents.fix_suggestion import FixSuggestionAgent
-    return FixSuggestionAgent(llm_provider=_get_llm_provider())
+    try:
+        provider = _get_llm_provider()
+    except Exception:
+        provider = None
+    return FixSuggestionAgent(llm_provider=provider)
 
 
 def _safe_finding_index(finding_index: int) -> int:
@@ -507,12 +550,18 @@ def _safe_finding_index(finding_index: int) -> int:
     return finding_index
 
 
+class BatchFixRequest(BaseModel):
+    finding_indices: Optional[List[int]] = None
+
+
 @router.post("/{review_id}/findings/{finding_index}/fix", status_code=200)
 async def generate_fix(
     review_id: str,
     finding_index: int,
+    force: bool = Query(False, description="If true, overwrite existing suggestion"),
     current_user: Any = Depends(get_current_user),
     service: CodeReviewService = Depends(get_code_review_service),
+    repo_service: RepositoryService = Depends(get_repository_service),
     fix_agent=Depends(get_fix_suggestion_agent),
 ):
     """
@@ -522,7 +571,7 @@ async def generate_fix(
     - Review ownership (404 for unauthorized users)
     - Review status == COMPLETED
     - Valid, non-negative finding_index
-    - Idempotency: returns existing suggestion without calling LLM again
+    - Idempotency: returns existing suggestion without calling LLM again (unless force=True)
     - Read-only: no repository files are modified
     """
     user_id = _extract_user_id(current_user)
@@ -548,9 +597,9 @@ async def generate_fix(
             detail=f"finding_index {finding_index} out of range (review has {len(findings)} findings)",
         )
 
-    # Idempotency check — return immediately without LLM call
+    # Idempotency check — return immediately without LLM call unless force is True
     existing_fix = findings[finding_index].get("fix_suggestion")
-    if existing_fix:
+    if existing_fix and not force:
         return {"fix_suggestion": existing_fix, "cached": True}
 
     # Build domain ReviewFinding for the agent
@@ -577,6 +626,7 @@ async def generate_fix(
 
     # Derive repository_id from review — never trust client-supplied value
     repository_id = review.repository_id
+    workspace_root = _resolve_repo_workspace_root(repository_id, repo_service)
 
     # Invoke agent (read-only, in-memory)
     from src.core.errors import LLMQuotaExceededError, WorkflowExecutionError
@@ -585,6 +635,7 @@ async def generate_fix(
             finding=finding,
             finding_index=finding_index,
             repository_id=repository_id,
+            workspace_root=workspace_root,
         )
     except LLMQuotaExceededError as exc:
         raise HTTPException(status_code=429, detail=f"LLM quota exceeded: {exc}")
@@ -600,11 +651,188 @@ async def generate_fix(
             finding_index=finding_index,
             fix_suggestion=fix_suggestion,
             user_id=user_id,
+            overwrite=force,
         )
     except (ValueError, IndexError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
     return {"fix_suggestion": persisted_fix, "cached": False}
+
+
+@router.post("/{review_id}/findings/{finding_index}/fix/regenerate", status_code=200)
+async def regenerate_fix(
+    review_id: str,
+    finding_index: int,
+    current_user: Any = Depends(get_current_user),
+    service: CodeReviewService = Depends(get_code_review_service),
+    repo_service: RepositoryService = Depends(get_repository_service),
+    fix_agent=Depends(get_fix_suggestion_agent),
+):
+    """Force-regenerate a fix suggestion, replacing any cached suggestion."""
+    return await generate_fix(
+        review_id=review_id,
+        finding_index=finding_index,
+        force=True,
+        current_user=current_user,
+        service=service,
+        repo_service=repo_service,
+        fix_agent=fix_agent,
+    )
+
+
+@router.post("/{review_id}/findings/fix-all-safe", status_code=200)
+async def fix_all_safe(
+    review_id: str,
+    current_user: Any = Depends(get_current_user),
+    service: CodeReviewService = Depends(get_code_review_service),
+    repo_service: RepositoryService = Depends(get_repository_service),
+    fix_agent=Depends(get_fix_suggestion_agent),
+):
+    """
+    Generate fix suggestions for all safe findings (confidence >= 0.85 and has file_path).
+    """
+    user_id = _extract_user_id(current_user)
+    review = service.get_review(review_id, user_id=user_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    from src.domain.entities.code_review import ReviewStatusEnum, ReviewFinding, SeverityEnum
+    if review.status != ReviewStatusEnum.COMPLETED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Fix generation requires a completed review (current status: '{review.status}')",
+        )
+
+    workspace_root = _resolve_repo_workspace_root(review.repository_id, repo_service)
+    findings = list(review.findings_json or [])
+    results = []
+
+    for idx, f_dict in enumerate(findings):
+        confidence = float(f_dict.get("confidence_score", 1.0))
+        file_path = f_dict.get("file_path")
+        if not file_path or confidence < 0.85:
+            continue
+
+        existing_fix = f_dict.get("fix_suggestion")
+        if existing_fix:
+            results.append({"finding_index": idx, "fix_suggestion": existing_fix, "cached": True})
+            continue
+
+        try:
+            severity_val = f_dict.get("severity", "medium")
+            try:
+                severity = SeverityEnum(severity_val)
+            except ValueError:
+                severity = SeverityEnum.MEDIUM
+
+            finding = ReviewFinding(
+                issue=f_dict.get("issue", "Unknown issue"),
+                severity=severity,
+                explanation=f_dict.get("explanation", ""),
+                suggested_fix=f_dict.get("suggested_fix"),
+                confidence_score=confidence,
+                file_path=file_path,
+                line_number=f_dict.get("line_number"),
+            )
+
+            fix_suggestion = await fix_agent.generate_fix(
+                finding=finding,
+                finding_index=idx,
+                repository_id=review.repository_id,
+                workspace_root=workspace_root,
+            )
+            persisted_fix = service.update_finding_fix_suggestion(
+                review_id=review_id,
+                finding_index=idx,
+                fix_suggestion=fix_suggestion,
+                user_id=user_id,
+            )
+            results.append({"finding_index": idx, "fix_suggestion": persisted_fix, "cached": False})
+        except Exception as exc:
+            results.append({"finding_index": idx, "error": str(exc)})
+
+    return {"results": results, "total_processed": len(results)}
+
+
+@router.post("/{review_id}/findings/fix-batch", status_code=200)
+async def fix_batch(
+    review_id: str,
+    req: BatchFixRequest,
+    current_user: Any = Depends(get_current_user),
+    service: CodeReviewService = Depends(get_code_review_service),
+    repo_service: RepositoryService = Depends(get_repository_service),
+    fix_agent=Depends(get_fix_suggestion_agent),
+):
+    """
+    Generate fix suggestions for a batch of specified finding indices.
+    """
+    user_id = _extract_user_id(current_user)
+    review = service.get_review(review_id, user_id=user_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    from src.domain.entities.code_review import ReviewStatusEnum, ReviewFinding, SeverityEnum
+    if review.status != ReviewStatusEnum.COMPLETED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Fix generation requires a completed review (current status: '{review.status}')",
+        )
+
+    workspace_root = _resolve_repo_workspace_root(review.repository_id, repo_service)
+    findings = list(review.findings_json or [])
+    indices = req.finding_indices if req.finding_indices is not None else list(range(len(findings)))
+    results = []
+
+    for idx in indices:
+        if idx < 0 or idx >= len(findings):
+            results.append({"finding_index": idx, "error": f"Index {idx} out of range"})
+            continue
+
+        f_dict = findings[idx]
+        file_path = f_dict.get("file_path")
+        if not file_path:
+            results.append({"finding_index": idx, "error": "No file_path provided for finding"})
+            continue
+
+        existing_fix = f_dict.get("fix_suggestion")
+        if existing_fix:
+            results.append({"finding_index": idx, "fix_suggestion": existing_fix, "cached": True})
+            continue
+
+        try:
+            severity_val = f_dict.get("severity", "medium")
+            try:
+                severity = SeverityEnum(severity_val)
+            except ValueError:
+                severity = SeverityEnum.MEDIUM
+
+            finding = ReviewFinding(
+                issue=f_dict.get("issue", "Unknown issue"),
+                severity=severity,
+                explanation=f_dict.get("explanation", ""),
+                suggested_fix=f_dict.get("suggested_fix"),
+                confidence_score=float(f_dict.get("confidence_score", 1.0)),
+                file_path=file_path,
+                line_number=f_dict.get("line_number"),
+            )
+
+            fix_suggestion = await fix_agent.generate_fix(
+                finding=finding,
+                finding_index=idx,
+                repository_id=review.repository_id,
+                workspace_root=workspace_root,
+            )
+            persisted_fix = service.update_finding_fix_suggestion(
+                review_id=review_id,
+                finding_index=idx,
+                fix_suggestion=fix_suggestion,
+                user_id=user_id,
+            )
+            results.append({"finding_index": idx, "fix_suggestion": persisted_fix, "cached": False})
+        except Exception as exc:
+            results.append({"finding_index": idx, "error": str(exc)})
+
+    return {"results": results, "total_processed": len(results)}
 
 
 @router.post("/{review_id}/findings/{finding_index}/fix/accept", status_code=200)
@@ -722,6 +950,44 @@ async def apply_fix(
         if "out of range" in err_msg or "finding_index must be" in err_msg or "invalid syntax" in err_msg:
             raise HTTPException(status_code=422, detail=err_msg)
         elif "Stale source" in err_msg or "completed review" in err_msg or "must be accepted" in err_msg:
+            raise HTTPException(status_code=409, detail=err_msg)
+        elif "Sandbox violation" in err_msg:
+            raise HTTPException(status_code=400, detail=err_msg)
+        elif "No fix suggestion exists" in err_msg:
+            raise HTTPException(status_code=404, detail=err_msg)
+        else:
+            raise HTTPException(status_code=422, detail=err_msg)
+
+
+@router.post("/{review_id}/findings/{finding_index}/fix/rollback", status_code=200)
+async def rollback_fix(
+    review_id: str,
+    finding_index: int,
+    current_user: Any = Depends(get_current_user),
+    use_case: RollbackAppliedFixUseCase = Depends(get_rollback_applied_fix_use_case),
+):
+    """
+    Rollback an applied fix suggestion, atomically restoring the original file content.
+    """
+    user_id = _extract_user_id(current_user)
+    _safe_finding_index(finding_index)
+
+    from src.core.errors import ResourceNotFoundError, WorkflowExecutionError
+
+    try:
+        result = await use_case.execute(
+            review_id=review_id,
+            finding_index=finding_index,
+            user_id=user_id,
+        )
+        return result
+    except ResourceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except WorkflowExecutionError as exc:
+        err_msg = str(exc)
+        if "out of range" in err_msg or "finding_index must be" in err_msg:
+            raise HTTPException(status_code=422, detail=err_msg)
+        elif "Cannot rollback fix with status" in err_msg:
             raise HTTPException(status_code=409, detail=err_msg)
         elif "Sandbox violation" in err_msg:
             raise HTTPException(status_code=400, detail=err_msg)

@@ -29,7 +29,7 @@ class DBCodeReview(Base):
     performance_findings_json = Column(JSON, default=list)
     confidence_score = Column(Float, default=1.0)
     duration_ms      = Column(Integer, nullable=True)
-    performance_score = Column(Float, default=0.0)
+    performance_score = Column(Float, nullable=True, default=None)
     performance_recommendations_json = Column(JSON, default=list)
     estimated_cpu_savings = Column(Float, default=0.0)
     estimated_memory_savings = Column(Float, default=0.0)
@@ -45,15 +45,19 @@ class DBCodeReview(Base):
 
     # Phase 11.5 – Architecture & Code Quality Analysis
     architecture_findings_json = Column(JSON, default=list)
-    overall_health_score = Column(Float, default=0.0)        # 0.0 – 100.0
-    architecture_score = Column(Float, default=0.0)          # 0.0 – 100.0
-    maintainability_score = Column(Float, default=0.0)       # 0.0 – 100.0
-    technical_debt_score = Column(Float, default=0.0)        # 0.0 – 100.0
-    complexity_score = Column(Float, default=0.0)            # 0.0 – 100.0
-    documentation_score = Column(Float, default=0.0)         # 0.0 – 100.0
-    modularity_score = Column(Float, default=0.0)             # 0.0 – 100.0
-    testability_score = Column(Float, default=0.0)            # 0.0 – 100.0
+    overall_health_score = Column(Float, nullable=True, default=None)        # 0.0 – 100.0 (None if not evaluated)
+    architecture_score = Column(Float, nullable=True, default=None)          # 0.0 – 100.0
+    maintainability_score = Column(Float, nullable=True, default=None)       # 0.0 – 100.0
+    technical_debt_score = Column(Float, nullable=True, default=None)        # 0.0 – 100.0
+    complexity_score = Column(Float, nullable=True, default=None)            # 0.0 – 100.0
+    documentation_score = Column(Float, nullable=True, default=None)         # 0.0 – 100.0
+    modularity_score = Column(Float, nullable=True, default=None)            # 0.0 – 100.0
+    testability_score = Column(Float, nullable=True, default=None)           # 0.0 – 100.0
     dependency_analysis_json = Column(JSON, default=dict)
+
+    # Per-category execution metadata: maps category name to
+    # {status, findings_count, duration_ms?, files_analyzed?, evaluated_at?}
+    category_metadata_json = Column(JSON, default=dict, nullable=True)
 
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), onupdate=func.now())

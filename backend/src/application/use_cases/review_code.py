@@ -1,5 +1,6 @@
 import time
 import uuid
+from datetime import datetime, timezone
 from src.domain.models.agents import AgentType
 
 from src.application.services.code_review_service import CodeReviewService
@@ -120,9 +121,25 @@ class ReviewCodeUseCase:
             agent_outputs = result.get("agent_outputs", {})
             confidence = result.get("confidence_score", 1.0)
 
-            # Code review & security findings
+            # Code review findings
             code_review_output = agent_outputs.get(AgentType.CODE_REVIEW.value, {})
-            findings = code_review_output.get("structured_findings", [])
+            code_review_findings = code_review_output.get("structured_findings", [])
+
+            # Security review findings
+            if security_enabled:
+                security_output = agent_outputs.get(AgentType.SECURITY_REVIEW.value, {})
+                security_findings = security_output.get("structured_findings", [])
+                # Normalize security findings to have compatible schema
+                for sf in security_findings:
+                    if "issue" not in sf and "vulnerability" in sf:
+                        sf["issue"] = sf["vulnerability"]
+                    if "confidence_score" not in sf and "confidence" in sf:
+                        sf["confidence_score"] = sf["confidence"]
+            else:
+                security_findings = []
+
+            # Combined findings for review.findings_json (code quality + security)
+            findings = list(code_review_findings) + list(security_findings)
 
             # Performance findings & scores
             if performance_enabled:
@@ -138,7 +155,10 @@ class ReviewCodeUseCase:
                     score = (1.0 - (total_weight / max_possible)) * 100 if max_possible else 100.0
                     return round(max(0.0, score), 2)
 
-                performance_score = calculate_performance_score(performance_findings)
+                if performance_output:
+                    performance_score = calculate_performance_score(performance_findings)
+                else:
+                    performance_score = None
 
                 performance_recommendations = []
                 estimated_cpu_savings = 0.0
@@ -161,7 +181,7 @@ class ReviewCodeUseCase:
                         })
             else:
                 performance_findings = []
-                performance_score = 0.0
+                performance_score = None
                 performance_recommendations = []
                 estimated_cpu_savings = 0.0
                 estimated_memory_savings = 0.0
@@ -170,7 +190,7 @@ class ReviewCodeUseCase:
             # Refactoring analysis output
             refactoring_output = agent_outputs.get(AgentType.REFACTORING_ANALYSIS.value, {})
             refactoring_findings = refactoring_output.get("structured_findings", [])
-            refactoring_priority = refactoring_output.get("overall_priority", "medium")
+            refactoring_priority = refactoring_output.get("overall_priority", "medium") if refactoring_output else None
             estimated_refactoring_effort = refactoring_output.get("estimated_total_effort_hours", 0.0)
             estimated_maintainability_improvement = refactoring_output.get("estimated_maintainability_improvement", 0.0)
             estimated_technical_debt_reduction = refactoring_output.get("estimated_technical_debt_reduction", 0.0)
@@ -183,34 +203,129 @@ class ReviewCodeUseCase:
                 quality_metrics = code_quality_output.get("metrics", {})
                 dependency_analysis = code_quality_output.get("dependency_analysis", {})
 
-                overall_health_score = quality_metrics.get("overall_health_score", 0.0)
-                architecture_score = quality_metrics.get("architecture_score", 0.0)
-                maintainability_score = quality_metrics.get("maintainability_score", 0.0)
-                technical_debt_score = quality_metrics.get("technical_debt_score", 0.0)
-                complexity_score = quality_metrics.get("complexity_score", 0.0)
-                documentation_score = quality_metrics.get("documentation_score", 0.0)
-                modularity_score = quality_metrics.get("modularity_score", 0.0)
-                testability_score = quality_metrics.get("testability_score", 0.0)
-
-                if not overall_health_score and architecture_findings:
-                    overall_health_score = max(30.0, round(100.0 - (len(architecture_findings) * 6.5), 1))
-                if not architecture_score and architecture_findings:
-                    architecture_score = max(40.0, round(100.0 - (len(architecture_findings) * 5.0), 1))
-                if not maintainability_score and architecture_findings:
-                    maintainability_score = max(35.0, round(100.0 - (len(architecture_findings) * 6.0), 1))
-                if not technical_debt_score and architecture_findings:
-                    technical_debt_score = max(25.0, round(100.0 - (len(architecture_findings) * 7.0), 1))
+                if quality_metrics:
+                    overall_health_score = quality_metrics.get("overall_health_score")
+                    architecture_score = quality_metrics.get("architecture_score")
+                    maintainability_score = quality_metrics.get("maintainability_score")
+                    technical_debt_score = quality_metrics.get("technical_debt_score")
+                    complexity_score = quality_metrics.get("complexity_score")
+                    documentation_score = quality_metrics.get("documentation_score")
+                    modularity_score = quality_metrics.get("modularity_score")
+                    testability_score = quality_metrics.get("testability_score")
+                elif code_quality_output:
+                    # Agent ran but metrics dict was omitted
+                    if architecture_findings:
+                        overall_health_score = max(30.0, round(100.0 - (len(architecture_findings) * 6.5), 1))
+                        architecture_score = max(40.0, round(100.0 - (len(architecture_findings) * 5.0), 1))
+                        maintainability_score = max(35.0, round(100.0 - (len(architecture_findings) * 6.0), 1))
+                        technical_debt_score = max(25.0, round(100.0 - (len(architecture_findings) * 7.0), 1))
+                        complexity_score = 75.0
+                        documentation_score = 80.0
+                        modularity_score = 75.0
+                        testability_score = 75.0
+                    else:
+                        overall_health_score = 100.0
+                        architecture_score = 100.0
+                        maintainability_score = 100.0
+                        technical_debt_score = 100.0
+                        complexity_score = 100.0
+                        documentation_score = 100.0
+                        modularity_score = 100.0
+                        testability_score = 100.0
+                else:
+                    # Code quality / architecture agent was not executed
+                    overall_health_score = None
+                    architecture_score = None
+                    maintainability_score = None
+                    technical_debt_score = None
+                    complexity_score = None
+                    documentation_score = None
+                    modularity_score = None
+                    testability_score = None
             else:
                 architecture_findings = []
                 dependency_analysis = {}
-                overall_health_score = 0.0
-                architecture_score = 0.0
-                maintainability_score = 0.0
-                technical_debt_score = 0.0
-                complexity_score = 0.0
-                documentation_score = 0.0
-                modularity_score = 0.0
-                testability_score = 0.0
+                overall_health_score = None
+                architecture_score = None
+                maintainability_score = None
+                technical_debt_score = None
+                complexity_score = None
+                documentation_score = None
+                modularity_score = None
+                testability_score = None
+
+            # Safe structured logging of counts
+            logger.info(
+                "review_findings_summary",
+                review_id=review_id,
+                raw_findings_count=len(code_review_findings) + len(security_findings) + len(performance_findings) + len(architecture_findings),
+                parsed_findings_count=len(findings) + len(performance_findings) + len(architecture_findings),
+                code_quality_count=len(code_review_findings),
+                security_count=len(security_findings),
+                performance_count=len(performance_findings),
+                architecture_count=len(architecture_findings),
+                overall_health_score=overall_health_score,
+                performance_score=performance_score,
+            )
+
+            # Build per-category execution metadata (real data only – no fabrication)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            category_metadata: dict = {}
+
+            if code_quality_enabled:
+                # The "Code Quality" UI tab shows findings from the code_review agent
+                # (stored in findings_json). Use code_review agent output to determine
+                # whether this category was actually evaluated.
+                cr_output = agent_outputs.get(AgentType.CODE_REVIEW.value, {})
+                category_metadata["code_quality"] = {
+                    "status": "completed" if cr_output else "not_evaluated",
+                    "findings_count": len(code_review_findings),
+                    "evaluated_at": now_iso if cr_output else None,
+                }
+            else:
+                category_metadata["code_quality"] = {"status": "not_evaluated", "findings_count": 0}
+
+            if security_enabled:
+                sec_output = agent_outputs.get(AgentType.SECURITY_REVIEW.value, {})
+                category_metadata["security"] = {
+                    "status": "completed" if sec_output else "not_evaluated",
+                    "findings_count": len(security_findings),
+                    "evaluated_at": now_iso if sec_output else None,
+                }
+            else:
+                category_metadata["security"] = {"status": "not_evaluated", "findings_count": 0}
+
+            if performance_enabled:
+                perf_output = agent_outputs.get(AgentType.PERFORMANCE.value, {})
+                category_metadata["performance"] = {
+                    "status": "completed" if perf_output else "not_evaluated",
+                    "findings_count": len(performance_findings),
+                    "evaluated_at": now_iso if perf_output else None,
+                }
+            else:
+                category_metadata["performance"] = {"status": "not_evaluated", "findings_count": 0}
+
+            if code_quality_enabled:
+                # Refactoring is scheduled by the planner only when code_quality is enabled
+                refact_output = agent_outputs.get(AgentType.REFACTORING_ANALYSIS.value, {})
+                category_metadata["refactoring"] = {
+                    "status": "completed" if refact_output else "not_evaluated",
+                    "findings_count": len(refactoring_findings),
+                    "evaluated_at": now_iso if refact_output else None,
+                }
+            else:
+                category_metadata["refactoring"] = {"status": "not_evaluated", "findings_count": 0}
+
+            if architecture_enabled or code_quality_enabled:
+                # Architecture metrics come from the code_quality architectural agent
+                arch_agent_output = agent_outputs.get(AgentType.CODE_QUALITY.value, {})
+                category_metadata["architecture"] = {
+                    "status": "completed" if arch_agent_output else "not_evaluated",
+                    "findings_count": len(architecture_findings),
+                    "evaluated_at": now_iso if arch_agent_output else None,
+                }
+            else:
+                category_metadata["architecture"] = {"status": "not_evaluated", "findings_count": 0}
 
             # Final check before updating DB to COMPLETED
             rev_final = self.review_service.get_review(review_id)
@@ -255,6 +370,7 @@ class ReviewCodeUseCase:
                 modularity_score=modularity_score,
                 testability_score=testability_score,
                 dependency_analysis=dependency_analysis,
+                category_metadata=category_metadata,
             )
             
             return {

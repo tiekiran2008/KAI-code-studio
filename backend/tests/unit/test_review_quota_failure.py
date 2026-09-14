@@ -45,7 +45,7 @@ class TestLLMQuotaExceededError:
         assert "quota" in str(exc).lower() or "429" in str(exc)
 
     def test_custom_message_preserved(self):
-        msg = "quota exceeded for model gemini-2.5-flash"
+        msg = "quota exceeded for model gemini-3.6-flash"
         exc = LLMQuotaExceededError(msg)
         assert str(exc) == msg
 

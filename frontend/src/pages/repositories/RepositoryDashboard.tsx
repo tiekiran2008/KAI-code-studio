@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRepositoryStore } from '../../store/repositoryStore';
+import { useRepoStore } from '../../store/useRepoStore';
 import { RepositoryProvider, IndexingStatus } from '../../types';
 import {
   Search, Plus, GitBranch, RefreshCw, CheckCircle2, Clock, AlertCircle,
-  Trash2, Eye, Filter, Github, ExternalLink, HardDrive
+  Trash2, Eye, Filter, Github, ExternalLink, HardDrive, Loader2, XCircle, Code2
 } from 'lucide-react';
+
 
 const ProviderBadge: React.FC<{ provider?: RepositoryProvider }> = ({ provider = 'github' }) => {
   switch (provider) {
@@ -37,12 +39,72 @@ const StatusBadge: React.FC<{ status?: IndexingStatus }> = ({ status = 'indexed'
 
 export const RepositoryDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { repositories, isLoading, fetchRepositories, deleteRepository, refreshRepository } = useRepositoryStore();
+  const {
+    repositories,
+    isLoading,
+    fetchRepositories,
+    deleteRepository,
+    reindexRepository,
+    fetchIndexStatus,
+  } = useRepositoryStore();
+  const { setActiveRepo } = useRepoStore();
+
 
   const [search, setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'updated_at' | 'chunks'>('updated_at');
+
+  // Per-repo reindex loading state: repoId -> true while the POST is in flight
+  const [reindexingIds, setReindexingIds] = useState<Set<string>>(new Set());
+  // Per-repo error messages surfaced from failed reindex requests
+  const [reindexErrors, setReindexErrors] = useState<Record<string, string>>({});
+
+  // Polling refs: track which repos are actively being indexed so we can poll
+  const pollingRefs = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  const stopPolling = useCallback((repoId: string) => {
+    if (pollingRefs.current[repoId]) {
+      clearInterval(pollingRefs.current[repoId]);
+      delete pollingRefs.current[repoId];
+    }
+  }, []);
+
+  const startPolling = useCallback((repoId: string) => {
+    stopPolling(repoId);
+    pollingRefs.current[repoId] = setInterval(async () => {
+      try {
+        const status = await fetchIndexStatus(repoId);
+        if (status.status !== 'indexing') {
+          stopPolling(repoId);
+          // Refresh full list to sync chunks_count etc.
+          fetchRepositories();
+        }
+      } catch {
+        stopPolling(repoId);
+      }
+    }, 5000);
+  }, [fetchIndexStatus, fetchRepositories, stopPolling]);
+
+  // Clean up all polling on unmount
+  useEffect(() => {
+    return () => {
+      Object.keys(pollingRefs.current).forEach(stopPolling);
+    };
+  }, [stopPolling]);
+
+  const handleReindex = useCallback(async (repoId: string) => {
+    setReindexingIds((prev) => new Set(prev).add(repoId));
+    setReindexErrors((prev) => { const n = { ...prev }; delete n[repoId]; return n; });
+    try {
+      await reindexRepository(repoId);
+      startPolling(repoId);
+    } catch (err: any) {
+      setReindexErrors((prev) => ({ ...prev, [repoId]: err.message || 'Failed to start re-indexing' }));
+    } finally {
+      setReindexingIds((prev) => { const n = new Set(prev); n.delete(repoId); return n; });
+    }
+  }, [reindexRepository, startPolling]);
 
   useEffect(() => {
     fetchRepositories();
@@ -251,27 +313,58 @@ export const RepositoryDashboard: React.FC = () => {
                       </td>
 
                       <td className="px-4 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => refreshRepository(repo.id)}
-                            className="p-1.5 rounded-lg glass-button text-slate-400 hover:text-white"
-                            title="Re-analyze and refresh repository"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => navigate(`/repositories/${repo.id}`)}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 text-xs font-medium border border-indigo-500/30 flex items-center gap-1"
-                          >
-                            <Eye className="w-3.5 h-3.5" /> Inspect
-                          </button>
-                          <button
-                            onClick={() => deleteRepository(repo.id)}
-                            className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-medium"
-                            title="Delete repository"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Re-index button — calls POST /api/v1/repositories/{id}/reindex */}
+                            <button
+                              id={`reindex-btn-${repo.id}`}
+                              onClick={() => handleReindex(repo.id)}
+                              disabled={
+                                reindexingIds.has(repo.id) ||
+                                (repo.indexing_status || repo.indexingStatus) === 'indexing'
+                              }
+                              className="p-1.5 rounded-lg glass-button text-slate-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              title="Re-index repository (triggers full Qdrant ingestion)"
+                            >
+                              {reindexingIds.has(repo.id) ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                await setActiveRepo(repo);
+                                navigate('/workspace');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 text-xs font-medium border border-indigo-500/30 flex items-center gap-1"
+                              title="Open in AI Workspace"
+                            >
+                              <Code2 className="w-3.5 h-3.5" /> Workspace
+                            </button>
+                            <button
+                              onClick={() => navigate(`/repositories/${repo.id}`)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs font-medium border border-slate-800"
+                              title="Inspect repository details"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => deleteRepository(repo.id)}
+                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-medium"
+                              title="Delete repository"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+
+                          </div>
+                          {/* Inline error for this row */}
+                          {reindexErrors[repo.id] && (
+                            <div className="flex items-center gap-1 text-[10px] text-rose-400 max-w-[220px] text-right">
+                              <XCircle className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{reindexErrors[repo.id]}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>

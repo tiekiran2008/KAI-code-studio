@@ -6,28 +6,38 @@ from src.domain.interfaces.vector_db import IVectorDB
 from src.domain.models.chunk import SemanticChunk
 
 class QdrantAdapter(IVectorDB):
-    def __init__(self, url: str = "http://localhost:6333"):
+    _ensured_collections = set()
+
+    def __init__(self, url: str = "http://127.0.0.1:6333"):
         self.client = get_shared_qdrant_client(url)
         
     def ensure_collection(self, collection_name: str, vector_size: int):
-        collections = self.client.get_collections().collections
-        if not any(c.name == collection_name for c in collections):
-            self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config=rest.VectorParams(
-                    size=vector_size,
-                    distance=rest.Distance.COSINE
-                )
-            )
-            # Create payload index for repo_id to accelerate filtered multi-tenant queries
-            try:
-                self.client.create_payload_index(
+        if collection_name in QdrantAdapter._ensured_collections:
+            return
+
+        try:
+            collections = self.client.get_collections().collections
+            if not any(c.name == collection_name for c in collections):
+                self.client.create_collection(
                     collection_name=collection_name,
-                    field_name="repo_id",
-                    field_schema=rest.PayloadSchemaType.KEYWORD
+                    vectors_config=rest.VectorParams(
+                        size=vector_size,
+                        distance=rest.Distance.COSINE
+                    )
                 )
-            except Exception:
-                pass
+                # Create payload index for repo_id to accelerate filtered multi-tenant queries
+                try:
+                    self.client.create_payload_index(
+                        collection_name=collection_name,
+                        field_name="repo_id",
+                        field_schema=rest.PayloadSchemaType.KEYWORD
+                    )
+                except Exception:
+                    pass
+            QdrantAdapter._ensured_collections.add(collection_name)
+        except Exception:
+            # Do not crash caller if Qdrant is temporarily busy
+            pass
 
     def upsert_chunks(self, collection_name: str, chunks: List[SemanticChunk], embeddings: List[List[float]]):
         points = []

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useThemeStore } from './useThemeStore';
 
 interface Toast {
   id: string;
@@ -7,7 +8,7 @@ interface Toast {
 }
 
 interface UIState {
-  theme: 'dark' | 'light';
+  theme: 'dark' | 'light' | 'ambient';
   sidebarCollapsed: boolean;
   commandPaletteOpen: boolean;
   activeModal: string | null;
@@ -21,12 +22,17 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  theme: 'dark',
+  theme: (useThemeStore.getState().resolvedTheme || 'dark'),
   sidebarCollapsed: false,
   commandPaletteOpen: false,
   activeModal: null,
   toasts: [],
-  toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+  toggleTheme: () => {
+    const current = useThemeStore.getState().theme;
+    const next = current === 'dark' ? 'ambient' : current === 'ambient' ? 'light' : 'dark';
+    useThemeStore.getState().setTheme(next);
+    set({ theme: next as 'dark' | 'light' | 'ambient' });
+  },
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setActiveModal: (modal) => set({ activeModal: modal }),
@@ -39,3 +45,8 @@ export const useUIStore = create<UIState>((set) => ({
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
 }));
+
+// Subscribe to useThemeStore updates to keep useUIStore in sync
+useThemeStore.subscribe((state) => {
+  useUIStore.setState({ theme: state.resolvedTheme });
+});

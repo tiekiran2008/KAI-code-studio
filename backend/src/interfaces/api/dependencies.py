@@ -373,7 +373,7 @@ def get_repository_ingestion_service(db_session: Session = Depends(get_db_sessio
     vector_db = _get_vector_db()
     emb_svc = _get_embedding_service()
     idx_mgr = IndexManager(emb_svc, vector_db, db_session)
-    return RepositoryIngestionService(idx_mgr, repo_repo)
+    return RepositoryIngestionService(idx_mgr, repo_repo, session_factory=_get_session_factory)
 
 
 def get_repository_service(db_session: Session = Depends(get_db_session)) -> Any:
@@ -385,7 +385,7 @@ def get_repository_service(db_session: Session = Depends(get_db_session)) -> Any
     vector_db = _get_vector_db()
     emb_svc = _get_embedding_service()
     idx_mgr = IndexManager(emb_svc, vector_db, db_session)
-    ingestion_svc = RepositoryIngestionService(idx_mgr, repo)
+    ingestion_svc = RepositoryIngestionService(idx_mgr, repo, session_factory=_get_session_factory)
     return RepositoryService(repo, ingestion_service=ingestion_svc, vector_db=vector_db)
 
 
@@ -397,33 +397,32 @@ def get_code_review_service(db_session: Session = Depends(get_db_session)) -> An
 
 
 def get_apply_fix_use_case(
-    db_session: Session = Depends(get_db_session),
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
     from src.application.use_cases.apply_fix import ApplyFixSuggestionUseCase
-
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
     return ApplyFixSuggestionUseCase(
         review_service=review_svc,
         repository_service=repo_svc,
     )
 
 
-def get_verify_applied_fix_use_case(
-    db_session: Session = Depends(get_db_session),
+def get_rollback_applied_fix_use_case(
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
-    from src.application.use_cases.verify_applied_fix import VerifyAppliedFixUseCase
+    from src.application.use_cases.rollback_applied_fix import RollbackAppliedFixUseCase
+    return RollbackAppliedFixUseCase(
+        review_service=review_svc,
+        repository_service=repo_svc,
+    )
 
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
+
+def get_verify_applied_fix_use_case(
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
+) -> Any:
+    from src.application.use_cases.verify_applied_fix import VerifyAppliedFixUseCase
     return VerifyAppliedFixUseCase(
         review_service=review_svc,
         repository_service=repo_svc,
@@ -431,17 +430,11 @@ def get_verify_applied_fix_use_case(
 
 
 def get_verify_applied_fix_tests_use_case(
-    db_session: Session = Depends(get_db_session),
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
     from src.application.use_cases.verify_applied_fix_tests import VerifyAppliedFixTestsUseCase
     from src.infrastructure.sandbox.sandbox_engine import SandboxExecutionEngine
-
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
     return VerifyAppliedFixTestsUseCase(
         review_service=review_svc,
         repository_service=repo_svc,
@@ -450,7 +443,8 @@ def get_verify_applied_fix_tests_use_case(
 
 
 def get_commit_applied_fix_use_case(
-    db_session: Session = Depends(get_db_session),
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
     """Dependency factory for CommitAppliedFixUseCase.
 
@@ -458,15 +452,8 @@ def get_commit_applied_fix_use_case(
     The workspace root is resolved from WORKSPACE_ROOT env var or cwd at request time
     (no absolute path accepted from the client).
     """
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
     from src.application.use_cases.commit_applied_fix import CommitAppliedFixUseCase
     from src.infrastructure.git.working_tree_manager import GitWorkingTreeManager
-
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
     return CommitAppliedFixUseCase(
         review_service=review_svc,
         repository_service=repo_svc,
@@ -475,21 +462,15 @@ def get_commit_applied_fix_use_case(
 
 
 def get_push_fix_branch_use_case(
-    db_session: Session = Depends(get_db_session),
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
     """Dependency factory for PushFixBranchUseCase.
 
     Wires CodeReviewService, RepositoryService, and GitWorkingTreeManager.
     """
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
     from src.application.use_cases.push_fix_branch import PushFixBranchUseCase
     from src.infrastructure.git.working_tree_manager import GitWorkingTreeManager
-
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
     return PushFixBranchUseCase(
         review_service=review_svc,
         repository_service=repo_svc,
@@ -498,9 +479,10 @@ def get_push_fix_branch_use_case(
 
 
 def get_create_fix_pull_request_use_case(
-    db_session: Session = Depends(get_db_session),
     current_user: Any = Depends(get_current_user),
     github_svc: Any = Depends(get_github_integration_service),
+    review_svc: Any = Depends(get_code_review_service),
+    repo_svc: Any = Depends(get_repository_service),
 ) -> Any:
     """Dependency factory for CreateFixPullRequestUseCase.
 
@@ -515,10 +497,6 @@ def get_create_fix_pull_request_use_case(
     SECURITY: The token is resolved server-side only, never logged, and never
     returned in any response payload.
     """
-    from src.infrastructure.repositories.code_review_repository import CodeReviewRepository
-    from src.application.services.code_review_service import CodeReviewService
-    from src.infrastructure.repositories.repository_repository import RepositoryRepository
-    from src.application.services.repository_service import RepositoryService
     from src.application.use_cases.create_fix_pull_request import CreateFixPullRequestUseCase
     from src.infrastructure.git.github_pr_service import GitHubPullRequestService
 
@@ -536,9 +514,6 @@ def get_create_fix_pull_request_use_case(
         except Exception:
             # Graceful degradation: if integration lookup fails, fall back to stored PAT
             pass
-
-    review_svc = CodeReviewService(CodeReviewRepository(db_session))
-    repo_svc = RepositoryService(RepositoryRepository(db_session))
 
     # Create a thin adapter that injects the per-user token into execute()
     use_case = CreateFixPullRequestUseCase(

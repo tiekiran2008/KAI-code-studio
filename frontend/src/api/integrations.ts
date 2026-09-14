@@ -63,8 +63,8 @@ export const integrationsApi = {
   /**
    * Disconnect the linked GitHub account and remove all stored tokens.
    */
-  async disconnectGitHub(): Promise<void> {
-    return fetchClient.delete('/integrations/github');
+  async disconnectGitHub(): Promise<{ connected: boolean; message: string }> {
+    return fetchClient.delete('/integrations/github/disconnect');
   },
 
   /**

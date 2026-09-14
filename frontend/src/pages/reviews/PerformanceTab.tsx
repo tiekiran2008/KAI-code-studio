@@ -3,7 +3,13 @@ import {
   PerformanceFinding,
   PerformanceRecommendation,
   FindingSeverity,
+  CategoryAnalysisMetadata,
+  CodeReview,
 } from '../../api/reviews';
+import {
+  CategoryStatusCard,
+  FindingSeverityCounts,
+} from './CategoryStatusCard';
 import {
   Zap,
   Cpu,
@@ -287,6 +293,8 @@ interface PerformanceTabProps {
   estimatedCpuSavings: number;
   estimatedMemorySavings: number;
   estimatedLatencyImprovement: number;
+  reviewStatus?: CodeReview['status'];
+  categoryMetadata?: CategoryAnalysisMetadata;
 }
 
 type SortField = 'severity' | 'confidence' | 'file';
@@ -301,6 +309,8 @@ export const PerformanceTab: React.FC<PerformanceTabProps> = ({
   estimatedCpuSavings,
   estimatedMemorySavings,
   estimatedLatencyImprovement,
+  reviewStatus = 'completed',
+  categoryMetadata,
 }) => {
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
@@ -325,6 +335,14 @@ export const PerformanceTab: React.FC<PerformanceTabProps> = ({
       : performanceScore >= 40
       ? 'text-amber-400'
       : 'text-rose-400';
+
+  const severityCounts = useMemo(() => {
+    const counts: FindingSeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => {
+      if (f.severity in counts) counts[f.severity as keyof FindingSeverityCounts]++;
+    });
+    return counts;
+  }, [findings]);
 
   const filtered = useMemo(() => {
     let list = [...findings];
@@ -374,19 +392,79 @@ export const PerformanceTab: React.FC<PerformanceTabProps> = ({
   const SEVERITIES: Array<FindingSeverity | 'all'> = ['all', 'critical', 'high', 'medium', 'low', 'info'];
 
   if (!findings.length) {
+    const isEvaluated = categoryMetadata
+      ? categoryMetadata.status === 'completed'
+      : performanceScore !== null && performanceScore !== undefined;
+
+    if (isEvaluated) {
+      return (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="glass-card p-5 rounded-2xl flex items-center gap-5 col-span-1">
+              <ScoreRing score={performanceScore} />
+              <div>
+                <div className="text-xs text-slate-400 mb-0.5">Performance Score</div>
+                <div className={`text-xl font-bold ${scoreColor}`}>{scoreLabel}</div>
+                <div className="text-xs text-slate-500">0 issues found</div>
+              </div>
+            </div>
+            <MetricCard
+              label="CPU Savings"
+              value={estimatedCpuSavings}
+              unit="%"
+              icon={<Cpu className="w-5 h-5 text-indigo-400" />}
+              colorClass="bg-indigo-500/10"
+            />
+            <MetricCard
+              label="Memory Savings"
+              value={estimatedMemorySavings}
+              unit="%"
+              icon={<MemoryStick className="w-5 h-5 text-violet-400" />}
+              colorClass="bg-violet-500/10"
+            />
+            <MetricCard
+              label="Latency Improvement"
+              value={estimatedLatencyImprovement}
+              unit="%"
+              icon={<Timer className="w-5 h-5 text-emerald-400" />}
+              colorClass="bg-emerald-500/10"
+            />
+          </div>
+          <CategoryStatusCard
+            categoryKey="performance"
+            reviewStatus={reviewStatus}
+            metadata={categoryMetadata}
+            findingsCount={0}
+            severityCounts={severityCounts}
+          />
+          {recommendations.length > 0 && <RecommendationsPanel recommendations={recommendations} />}
+        </div>
+      );
+    }
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
-        <CheckCircle2 className="w-12 h-12 text-emerald-400 opacity-60" />
-        <p className="text-base font-medium text-slate-300">No Performance Issues Found</p>
-        <p className="text-xs text-slate-500 text-center max-w-xs">
-          The performance analysis did not detect any issues in this codebase.
-        </p>
+      <div className="space-y-6">
+        <CategoryStatusCard
+          categoryKey="performance"
+          reviewStatus={reviewStatus}
+          metadata={categoryMetadata ?? { status: 'not_evaluated', findings_count: 0 }}
+          findingsCount={0}
+          severityCounts={severityCounts}
+        />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Category header when findings exist */}
+      <CategoryStatusCard
+        categoryKey="performance"
+        reviewStatus={reviewStatus}
+        metadata={categoryMetadata}
+        findingsCount={findings.length}
+        severityCounts={severityCounts}
+      />
+
       {/* Score header row */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {/* Score Card */}

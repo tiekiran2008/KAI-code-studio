@@ -123,11 +123,11 @@ async def test_disabled_performance_suppresses_fake_scores():
     assert res["status"] == "completed"
     assert mock_agent_executor.execute.called
 
-    # Verify update_review_status was called without fake scores for performance/architecture
+    # Verify update_review_status was called without fake scores for performance/architecture (None when disabled)
     call_kwargs = mock_review_service.update_review_status.call_args.kwargs
-    assert call_kwargs["performance_score"] == 0.0
+    assert call_kwargs["performance_score"] is None
     assert call_kwargs["performance_findings"] == []
-    assert call_kwargs["overall_health_score"] == 0.0
+    assert call_kwargs["overall_health_score"] is None
     assert call_kwargs["architecture_findings"] == []
 
 

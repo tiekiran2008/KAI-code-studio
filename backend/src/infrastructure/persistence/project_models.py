@@ -29,7 +29,7 @@ class DBProject(Base):
     status       = Column(String, default="active", nullable=False)  # active | archived
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     repositories = relationship(
         "DBRepository",

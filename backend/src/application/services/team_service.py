@@ -35,19 +35,80 @@ class TeamService:
         self.session.add(log)
         return log
 
+    def _resolve_profiles(self, user_ids: List[str]) -> dict:
+        """
+        Bulk-fetch user profiles for a list of user_ids.
+        Returns a dict: { user_id -> {"name": ..., "avatar": ...} }
+        Falls back gracefully if user_profiles table is missing or profile not found.
+        """
+        if not user_ids:
+            return {}
+        try:
+            from src.infrastructure.persistence.user_profile_models import DBUserProfile
+            profiles = (
+                self.session.query(DBUserProfile)
+                .filter(DBUserProfile.user_id.in_(user_ids))
+                .all()
+            )
+            return {
+                p.user_id: {
+                    "name": p.name or None,
+                    "avatar": p.avatar or None,
+                }
+                for p in profiles
+            }
+        except Exception:
+            return {}
+
+    def _resolve_emails(self, user_ids: List[str]) -> dict:
+        """
+        Attempt to fetch email addresses from Supabase auth.users via raw SQL.
+        Returns a dict: { user_id -> email_str }
+        Silently returns empty dict if unavailable (e.g. dev/test mode).
+        """
+        if not user_ids:
+            return {}
+        try:
+            from sqlalchemy import text
+            placeholders = ", ".join([f"'{uid}'" for uid in user_ids])
+            sql = text(f"SELECT id, email FROM auth.users WHERE id IN ({placeholders})")
+            rows = self.session.execute(sql).fetchall()
+            return {str(r[0]): r[1] for r in rows}
+        except Exception:
+            return {}
+
     def _to_entity(self, db_team: DBTeam) -> Team:
-        members = [
-            TeamMember(
+        member_user_ids = [m.user_id for m in (db_team.members or [])]
+
+        # Bulk resolve profiles and emails (no N+1)
+        profiles = self._resolve_profiles(member_user_ids)
+        emails = self._resolve_emails(member_user_ids)
+
+        members = []
+        for m in (db_team.members or []):
+            profile = profiles.get(m.user_id, {})
+            email = emails.get(m.user_id) or None
+
+            # Prefer profile name; fall back to email prefix; never show raw UUID as name
+            raw_name = profile.get("name")
+            if raw_name:
+                display_name = raw_name
+            elif email:
+                display_name = email.split("@")[0]
+            else:
+                display_name = None  # frontend shows "Unknown Member"
+
+            members.append(TeamMember(
                 id=m.id,
                 team_id=m.team_id,
                 user_id=m.user_id,
                 role=RoleEnum(m.role),
-                email=f"{m.user_id}@example.com",
-                name=m.user_id.split("-")[0].capitalize(),
+                email=email,
+                name=display_name,
+                avatar=profile.get("avatar"),
                 joined_at=m.joined_at,
-            )
-            for m in (db_team.members or [])
-        ]
+            ))
+
         return Team(
             id=db_team.id,
             name=db_team.name,
@@ -55,8 +116,8 @@ class TeamService:
             owner_id=db_team.owner_id,
             member_count=len(members),
             members=members,
-            created_at=db_team.created_at,
-            updated_at=db_team.updated_at,
+            created_at=db_team.created_at or datetime.now(),
+            updated_at=db_team.updated_at or db_team.created_at or datetime.now(),
         )
 
     def get_user_role_in_team(self, user_id: str, team_id: str) -> Optional[RoleEnum]:
@@ -199,11 +260,23 @@ class TeamService:
         )
         self.session.commit()
         self.session.refresh(target_member)
+
+        # Resolve profile for returned member
+        profiles = self._resolve_profiles([target_member.user_id])
+        emails = self._resolve_emails([target_member.user_id])
+        profile = profiles.get(target_member.user_id, {})
+        email = emails.get(target_member.user_id)
+        raw_name = profile.get("name")
+        display_name = raw_name or (email.split("@")[0] if email else None)
+
         return TeamMember(
             id=target_member.id,
             team_id=target_member.team_id,
             user_id=target_member.user_id,
             role=RoleEnum(target_member.role),
+            email=email,
+            name=display_name,
+            avatar=profile.get("avatar"),
             joined_at=target_member.joined_at,
         )
 
@@ -254,16 +327,29 @@ class TeamService:
             .limit(limit)
             .all()
         )
-        return [
-            AuditLog(
+
+        # Bulk-resolve actor profiles (one query per type, not N queries)
+        actor_ids = list({l.actor_id for l in logs})
+        profiles = self._resolve_profiles(actor_ids)
+        emails = self._resolve_emails(actor_ids)
+
+        result = []
+        for l in logs:
+            profile = profiles.get(l.actor_id, {})
+            email = emails.get(l.actor_id)
+            raw_name = profile.get("name")
+            actor_name = raw_name or (email.split("@")[0] if email else None)
+
+            result.append(AuditLog(
                 id=l.id,
                 team_id=l.team_id,
                 actor_id=l.actor_id,
+                actor_name=actor_name,
+                actor_email=email,
                 action=l.action,
                 target_type=l.target_type,
                 target_id=l.target_id,
                 details_json=l.details_json or {},
                 created_at=l.created_at,
-            )
-            for l in logs
-        ]
+            ))
+        return result

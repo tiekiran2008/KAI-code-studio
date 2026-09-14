@@ -74,7 +74,7 @@ services:
       POSTGRES_URL: "postgresql://agent_user:agent_password@postgres:5432/agent_db"
       REDIS_URL: "redis://redis:6379/0"
       QDRANT_URL: "http://qdrant:6333"
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:80","http://localhost"]'
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost:80","http://127.0.0.1:80","http://localhost","http://127.0.0.1","http://localhost:5173","http://127.0.0.1:5173"]'
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,21 +105,21 @@ services:
         VITE_API_BASE_URL: ""
         VITE_API_PREFIX: /api/v1
         # Supabase public values — safe to embed in the frontend bundle.
-        # Override by setting VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
-        # as environment variables before running docker-compose build.
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+        # These are read from the frontend .env file at build time via the
+        # env_file directive. Shell-level overrides take precedence if set.
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-https://ofdvllzzwamyymovzkhc.supabase.co}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mZHZsbHp6d2FteXltb3Z6a2hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwMDQwMzAsImV4cCI6MjEwMTU4MDAzMH0.OK-KNanVkYvMWpIrp9KUmZS97iRnx_vdAspYgVhN-s4}
     ports:
       - "3000:80"
     depends_on:
       backend:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/nginx-health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   postgres_data:

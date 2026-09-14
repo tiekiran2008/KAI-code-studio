@@ -38,13 +38,40 @@ class WorkflowExecutionError(Exception):
     def __init__(self, message: str = "Agent workflow execution failed"):
         super().__init__(message)
 
+async def llm_quota_exception_handler(request: Request, exc: LLMQuotaExceededError) -> JSONResponse:
+    """Handles LLM quota and provider rate limits gracefully with HTTP 429."""
+    logger.warning("llm_quota_exceeded_handled", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": "AI provider rate limit reached. Please retry shortly.",
+            "retry_after": 60,
+        },
+        headers={"Retry-After": "60"},
+    )
+
+
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catches all unhandled exceptions."""
-    logger.error("unhandled_exception", error=str(exc), path=request.url.path)
+    exc_str = str(exc)
+    # Intercept rate-limit and quota exhaustion errors from underlying providers
+    if any(kw in exc_str for kw in ("429", "RESOURCE_EXHAUSTED", "rate limit", "quota")):
+        logger.warning("provider_rate_limit_intercepted", path=request.url.path, error=exc_str[:200])
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={
+                "detail": "AI provider rate limit reached. Please retry shortly.",
+                "retry_after": 60,
+            },
+            headers={"Retry-After": "60"},
+        )
+
+    logger.error("unhandled_exception", error=exc_str, path=request.url.path)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error"}
     )
+
 
 async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     """Catches explicitly raised API errors."""
@@ -53,3 +80,4 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
         status_code=exc.status_code,
         content={"detail": exc.message}
     )
+

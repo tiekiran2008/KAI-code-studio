@@ -117,6 +117,9 @@ export function deriveFixWorkflowSteps(
   } else if (fix?.application_status === 'apply_failed') {
     applyStatus = 'failed';
     applyText = 'Apply Failed';
+  } else if (fix?.application_status === 'rolled_back') {
+    applyStatus = 'current';
+    applyText = 'Rolled Back';
   } else {
     applyStatus = 'current';
     applyText = 'Ready to Apply';

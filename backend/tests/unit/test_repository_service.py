@@ -95,3 +95,16 @@ class TestRepositoryService:
         res = self.service.health_check(self.user_id, "repo-1")
         assert res.is_reachable is True
         assert res.latency_ms is not None
+
+    def test_to_entity_handles_legacy_null_provider(self):
+        db_r = _make_db_repo(user_id=self.user_id, provider=None)
+        self.mock_detector.detect_provider.return_value = "github"
+        entity = self.service._to_entity(db_r)
+        assert entity.provider.value == "github"
+
+    def test_to_entity_handles_invalid_provider_string(self):
+        db_r = _make_db_repo(user_id=self.user_id, provider="unknown_provider")
+        self.mock_detector.detect_provider.return_value = "github"
+        entity = self.service._to_entity(db_r)
+        assert entity.provider.value == "github"
+
