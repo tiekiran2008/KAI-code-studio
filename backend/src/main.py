@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.core.config import settings
+from src.core.config import settings, mask_url_credentials
 from src.core.errors import (
     APIError,
     LLMQuotaExceededError,
@@ -139,19 +139,19 @@ def _init_postgres() -> None:
 
 def _init_redis() -> None:
     """Ping Redis to verify connectivity."""
-    client = redis_lib.from_url(settings.REDIS_URL, decode_responses=False)
+    client = redis_lib.from_url(settings.REDIS_URL, **settings.get_redis_kwargs())
     client.ping()
     client.close()
-    logger.info("redis_init_ok", url=settings.REDIS_URL)
+    logger.info("redis_init_ok", url=mask_url_credentials(settings.REDIS_URL))
 
 
 def _init_qdrant() -> None:
     """Probe Qdrant to verify connectivity."""
     from qdrant_client import QdrantClient
 
-    client = QdrantClient(url=settings.QDRANT_URL, timeout=5)
+    client = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None, timeout=5)
     client.get_collections()
-    logger.info("qdrant_init_ok", url=settings.QDRANT_URL)
+    logger.info("qdrant_init_ok", url=mask_url_credentials(settings.QDRANT_URL))
 
 
 def _build_memory_manager() -> Any:
@@ -188,11 +188,12 @@ def _build_memory_manager() -> Any:
 
     vector_store = QdrantMemoryVectorStore(
         qdrant_url=settings.QDRANT_URL,
+        api_key=settings.QDRANT_API_KEY or None,
         vector_dim=settings.MEMORY_VECTOR_DIM,
         collection_name=settings.MEMORY_VECTOR_COLLECTION,
     )
 
-    redis_client = redis_lib_inner.from_url(settings.REDIS_URL, decode_responses=False)
+    redis_client = redis_lib_inner.from_url(settings.REDIS_URL, **settings.get_redis_kwargs())
     session_cache = RedisSessionCache(redis_client)
 
     embedding_service = _get_embedding_service()
@@ -262,7 +263,7 @@ def _build_langgraph_supervisor(app_state: Any) -> Any:
     llm_provider = _get_llm_provider()
     embedding_service = _get_embedding_service()
     vector_db = _get_vector_db()
-    redis_client = redis_lib_inner.from_url(settings.REDIS_URL, decode_responses=False)
+    redis_client = redis_lib_inner.from_url(settings.REDIS_URL, **settings.get_redis_kwargs())
 
     query_processor = QueryProcessor(
         llm_provider=llm_provider,
@@ -479,3 +480,11 @@ async def app_health() -> dict:
         "version": "1.0.0",
         "environment": settings.ENVIRONMENT,
     }
+
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("src.main:app", host="0.0.0.0", port=port, reload=False)

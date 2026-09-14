@@ -1,7 +1,6 @@
 import os
 import threading
-from typing import List, Optional
-from sentence_transformers import SentenceTransformer
+from typing import Any, List, Optional
 from src.domain.interfaces.embedding import IEmbeddingService
 from src.core.logger import logger
 
@@ -9,16 +8,16 @@ from src.core.logger import logger
 class SentenceTransformerService(IEmbeddingService):
     """
     SentenceTransformer embedding service.
-    Uses a process-level thread-safe singleton model cache to prevent repeated
-    model initializations across requests and background tasks.
+    Uses lazy model loading and a process-level thread-safe singleton cache
+    to prevent memory spikes during application startup.
     """
     _model_lock = threading.Lock()
-    _shared_model: Optional[SentenceTransformer] = None
+    _shared_model: Optional[Any] = None
     _shared_dimension: int = 384
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.model_name = model_name
-        self._ensure_model_loaded()
+        # Intentionally lazy — do NOT load heavy model in __init__
 
     def _ensure_model_loaded(self) -> None:
         if SentenceTransformerService._shared_model is not None:
@@ -29,6 +28,8 @@ class SentenceTransformerService(IEmbeddingService):
                 return
 
             logger.info("sentence_transformer_init_start", model=self.model_name)
+            from sentence_transformers import SentenceTransformer
+
             # Try loading locally first to avoid unnecessary remote Hugging Face checks
             try:
                 model = SentenceTransformer(self.model_name, local_files_only=True)
@@ -53,7 +54,7 @@ class SentenceTransformerService(IEmbeddingService):
             )
 
     @property
-    def model(self) -> SentenceTransformer:
+    def model(self) -> Any:
         if SentenceTransformerService._shared_model is None:
             self._ensure_model_loaded()
         return SentenceTransformerService._shared_model

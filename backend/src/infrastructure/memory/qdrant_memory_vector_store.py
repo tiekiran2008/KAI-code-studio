@@ -44,16 +44,21 @@ class QdrantMemoryVectorStore(IMemoryVectorStore):
 
     def __init__(
         self,
-        qdrant_url: str,
+        qdrant_url: str = "",
         vector_dim: int | None = None,
         collection_name: str = _COLLECTION_NAME,
+        api_key: str | None = None,
     ) -> None:
         from src.infrastructure.vector_db.qdrant_client_factory import get_shared_qdrant_client
         from qdrant_client.models import Distance, VectorParams
+        from src.core.config import settings
+
+        effective_url = qdrant_url or settings.QDRANT_URL
+        effective_api_key = api_key if api_key is not None else (settings.QDRANT_API_KEY or None)
 
         self._dim = vector_dim or int(os.getenv("MEMORY_VECTOR_DIM", "384"))
         self._collection = collection_name
-        self._client = get_shared_qdrant_client(qdrant_url)
+        self._client = get_shared_qdrant_client(effective_url, api_key=effective_api_key)
         self._distance = Distance.COSINE
         self._vector_params = VectorParams(size=self._dim, distance=self._distance)
         self._ensure_collection()

@@ -33,12 +33,12 @@ def _get_embedding_service():
 def _get_vector_db():
     """Cached Qdrant adapter."""
     from src.infrastructure.vector_db.qdrant_adapter import QdrantAdapter
-    return QdrantAdapter(url=settings.QDRANT_URL)
+    return QdrantAdapter(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None)
 
 
 @lru_cache(maxsize=1)
 def _get_llm_provider():
-    """Cached LLM provider â€” raises LLMConfigurationError if no key present."""
+    """Cached LLM provider — raises LLMConfigurationError if no key present."""
     from src.infrastructure.llm.llm_factory import create_llm_provider
     return create_llm_provider()
 
@@ -59,7 +59,7 @@ def _get_session_factory():
 
 def get_redis_client() -> Generator[redis.Redis, None, None]:
     """Dependency for injecting a Redis client."""
-    client = redis.from_url(settings.REDIS_URL, decode_responses=False)
+    client = redis.from_url(settings.REDIS_URL, **settings.get_redis_kwargs())
     try:
         yield client
     finally:

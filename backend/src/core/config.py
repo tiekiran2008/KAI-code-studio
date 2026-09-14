@@ -1,7 +1,16 @@
 import json
-from typing import List, Union
-from pydantic import field_validator
+import os
+import re
+from typing import Any, Dict, List, Union
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def mask_url_credentials(url: str) -> str:
+    """Utility to mask username/passwords in connection URLs for safe logging."""
+    if not url:
+        return ""
+    return re.sub(r"://([^:@]+):([^@]+)@", r"://\1:****@", url)
 
 
 class Settings(BaseSettings):
@@ -9,11 +18,35 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # ---- Database ----
+    DATABASE_URL: str = ""
     POSTGRES_URL: str = "postgresql://agent_user:agent_password@localhost:5432/agent_db"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # ---- Vector Store ----
     QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""
+
+    @model_validator(mode="after")
+    def assemble_effective_urls(self) -> "Settings":
+        # Render sets DATABASE_URL; prioritize DATABASE_URL if non-empty, otherwise POSTGRES_URL
+        effective_db = (
+            os.getenv("DATABASE_URL")
+            or self.DATABASE_URL
+            or os.getenv("POSTGRES_URL")
+            or self.POSTGRES_URL
+        )
+        if effective_db:
+            if effective_db.startswith("postgres://"):
+                effective_db = effective_db.replace("postgres://", "postgresql://", 1)
+            self.POSTGRES_URL = effective_db
+        return self
+
+    def get_redis_kwargs(self) -> Dict[str, Any]:
+        """Returns redis client kwargs, injecting ssl settings for Upstash/rediss TLS connections."""
+        kwargs: Dict[str, Any] = {"decode_responses": False}
+        if self.REDIS_URL.startswith("rediss://"):
+            kwargs["ssl_cert_reqs"] = None
+        return kwargs
 
     # ---- CORS ----
     CORS_ORIGINS: List[str] = [

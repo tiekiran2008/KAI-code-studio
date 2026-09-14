@@ -5,11 +5,15 @@ from src.infrastructure.vector_db.qdrant_client_factory import get_shared_qdrant
 from src.domain.interfaces.vector_db import IVectorDB
 from src.domain.models.chunk import SemanticChunk
 
+from src.core.config import settings
+
 class QdrantAdapter(IVectorDB):
     _ensured_collections = set()
 
-    def __init__(self, url: str = "http://127.0.0.1:6333"):
-        self.client = get_shared_qdrant_client(url)
+    def __init__(self, url: str = "", api_key: Optional[str] = None):
+        q_url = url or settings.QDRANT_URL
+        q_api_key = api_key if api_key is not None else (settings.QDRANT_API_KEY or None)
+        self.client = get_shared_qdrant_client(q_url, api_key=q_api_key)
         
     def ensure_collection(self, collection_name: str, vector_size: int):
         if collection_name in QdrantAdapter._ensured_collections:
