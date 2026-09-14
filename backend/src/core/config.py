@@ -40,12 +40,22 @@ class Settings(BaseSettings):
                 effective_db = effective_db.replace("postgres://", "postgresql://", 1)
             self.POSTGRES_URL = effective_db
 
+        # Always ensure key production Vercel origins are included in CORS_ORIGINS
+        default_prod_origins = [
+            "https://kai-code-studio.vercel.app",
+            "https://kai-code-studio-git-master-kiran08461kumar-9455s-projects.vercel.app",
+            "https://kai-code-studio-h83nbpgfj-kiran08461kumar-9455s-projects.vercel.app",
+        ]
+        for prod_origin in default_prod_origins:
+            if prod_origin not in self.CORS_ORIGINS:
+                self.CORS_ORIGINS.append(prod_origin)
+
         # Automatically include FRONTEND_URL in CORS_ORIGINS
         frontend_url = os.getenv("FRONTEND_URL") or self.FRONTEND_URL
         if frontend_url:
             for url_part in frontend_url.split(","):
-                cleaned = url_part.strip().rstrip("/")
-                if cleaned and cleaned not in self.CORS_ORIGINS:
+                cleaned = url_part.strip().strip("'\"").rstrip("/")
+                if cleaned and cleaned != "*" and cleaned not in self.CORS_ORIGINS:
                     self.CORS_ORIGINS.append(cleaned)
 
         return self
@@ -58,6 +68,7 @@ class Settings(BaseSettings):
         return kwargs
 
     # ---- CORS ----
+    CORS_ORIGIN_REGEX: str = r"^https://kai-code-studio.*\.vercel\.app$"
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
@@ -67,6 +78,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:80",
         "http://localhost",
         "http://127.0.0.1",
+        "https://kai-code-studio.vercel.app",
+        "https://kai-code-studio-git-master-kiran08461kumar-9455s-projects.vercel.app",
+        "https://kai-code-studio-h83nbpgfj-kiran08461kumar-9455s-projects.vercel.app",
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -79,13 +93,25 @@ class Settings(BaseSettings):
                 try:
                     parsed = json.loads(raw)
                     if isinstance(parsed, list):
-                        origins = [str(item).strip().rstrip("/") for item in parsed if item]
+                        origins = [
+                            str(item).strip().strip("'\"").rstrip("/")
+                            for item in parsed
+                            if item and str(item).strip().strip("'\"") != "*"
+                        ]
                 except Exception:
                     pass
             if not origins:
-                origins = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+                origins = [
+                    item.strip().strip("'\"").rstrip("/")
+                    for item in raw.split(",")
+                    if item.strip() and item.strip().strip("'\"") != "*"
+                ]
         elif isinstance(v, list):
-            origins = [str(item).strip().rstrip("/") for item in v if item]
+            origins = [
+                str(item).strip().strip("'\"").rstrip("/")
+                for item in v
+                if item and str(item).strip().strip("'\"") != "*"
+            ]
 
         # Ensure both localhost:3000 and 127.0.0.1:3000 are present if either is configured
         if "http://localhost:3000" in origins and "http://127.0.0.1:3000" not in origins:
