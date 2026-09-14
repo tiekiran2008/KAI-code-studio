@@ -455,7 +455,10 @@ app.add_middleware(
         "If-Modified-Since",
         "X-Request-ID",
         "X-Process-Time-Ms",
-        "X-User-ID",  # custom header sent by the frontend API client
+        # NOTE: X-User-ID is intentionally omitted. Cloudflare WAF (in front of
+        # Render) blocks preflight requests containing non-whitelisted custom
+        # headers. Memory endpoints that need X-User-ID are called server-side
+        # or by callers that can bypass the WAF restriction.
     ],
     expose_headers=["X-Request-ID", "X-Process-Time-Ms"],
 )

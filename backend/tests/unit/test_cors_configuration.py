@@ -116,16 +116,20 @@ def test_cors_preflight_regex_match_for_dynamic_preview():
 
 
 @pytest.mark.parametrize("origin", [VERCEL_GIT_MASTER_URL, VERCEL_PROD_URL])
-def test_cors_preflight_with_x_user_id_header(origin):
+def test_cors_preflight_standard_headers_return_200(origin):
     """
-    Verifies that preflight OPTIONS requests including the frontend's three
-    custom headers — Authorization, X-User-ID, Content-Type — are accepted
-    with HTTP 200 and the correct CORS allow-headers echoed back.
+    Verifies that preflight OPTIONS requests with standard headers
+    (Authorization + Content-Type) return HTTP 200 with correct CORS headers.
 
-    This is the exact scenario that was failing in production: protected
-    endpoints (/workspaces, /teams, /repositories, /integrations/github/connect)
-    sent these three headers, but X-User-ID was not listed in allow_headers,
-    causing the browser to block the request.
+    Root cause of the previous production failure:
+    - The frontend fetchClient was adding X-User-ID to every request.
+    - Cloudflare WAF (in front of Render) blocks preflight OPTIONS requests
+      that contain non-whitelisted custom headers, returning 400
+      "Disallowed CORS headers" before the request reached FastAPI.
+    - Fix: removed X-User-ID from the shared fetchClient; callers that need
+      it (e.g. /memory routes) must pass it explicitly in options.headers.
+
+    This test validates the corrected request shape that the frontend now sends.
     """
     client = TestClient(app)
 
@@ -134,7 +138,7 @@ def test_cors_preflight_with_x_user_id_header(origin):
         headers={
             "Origin": origin,
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "authorization,x-user-id,content-type",
+            "Access-Control-Request-Headers": "authorization,content-type",
         },
     )
 
@@ -146,5 +150,4 @@ def test_cors_preflight_with_x_user_id_header(origin):
 
     allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
     assert "authorization" in allowed_headers, "Authorization must be in Access-Control-Allow-Headers"
-    assert "x-user-id" in allowed_headers, "X-User-ID must be in Access-Control-Allow-Headers"
     assert "content-type" in allowed_headers, "Content-Type must be in Access-Control-Allow-Headers"

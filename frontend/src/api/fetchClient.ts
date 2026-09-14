@@ -155,12 +155,11 @@ async function client<T>(endpoint: string, options: FetchOptions = {}): Promise<
     }
   }
 
-  // Supply X-User-ID header for memory & multi-tenant APIs if available
-  const authUser = getAuthUser();
-  const userId = authUser?.id || 'usr-admin-1';
-  if (headerRecord && !headerRecord['X-User-ID'] && !headerRecord['x-user-id']) {
-    headerRecord['X-User-ID'] = userId;
-  }
+  // NOTE: Do NOT add custom non-standard headers (e.g. X-User-ID) here.
+  // Cloudflare WAF (in front of Render) blocks preflight OPTIONS requests that
+  // contain non-whitelisted custom headers, returning 400 "Disallowed CORS headers"
+  // before the request reaches FastAPI. If a specific endpoint needs X-User-ID
+  // (e.g. /memory routes), the caller must pass it explicitly via options.headers.
 
   let response: Response;
   try {
