@@ -39,6 +39,15 @@ class Settings(BaseSettings):
             if effective_db.startswith("postgres://"):
                 effective_db = effective_db.replace("postgres://", "postgresql://", 1)
             self.POSTGRES_URL = effective_db
+
+        # Automatically include FRONTEND_URL in CORS_ORIGINS
+        frontend_url = os.getenv("FRONTEND_URL") or self.FRONTEND_URL
+        if frontend_url:
+            for url_part in frontend_url.split(","):
+                cleaned = url_part.strip().rstrip("/")
+                if cleaned and cleaned not in self.CORS_ORIGINS:
+                    self.CORS_ORIGINS.append(cleaned)
+
         return self
 
     def get_redis_kwargs(self) -> Dict[str, Any]:
