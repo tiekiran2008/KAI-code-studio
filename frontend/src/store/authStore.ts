@@ -33,6 +33,18 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const session = await authApi.login(email, password);
+          if (session.access_token) {
+            try {
+              localStorage.setItem('access_token', session.access_token);
+              localStorage.setItem('auth_token', session.access_token);
+            } catch {}
+          }
+          if (session.user) {
+            try {
+              localStorage.setItem('user', JSON.stringify(session.user));
+              localStorage.setItem('auth_user', JSON.stringify(session.user));
+            } catch {}
+          }
           set({
             user: session.user,
             accessToken: session.access_token || null,
@@ -85,6 +97,18 @@ export const useAuthStore = create<AuthState>()(
       },
 
       setOAuthSession: (session: UserSession) => {
+        if (session.access_token) {
+          try {
+            localStorage.setItem('access_token', session.access_token);
+            localStorage.setItem('auth_token', session.access_token);
+          } catch {}
+        }
+        if (session.user) {
+          try {
+            localStorage.setItem('user', JSON.stringify(session.user));
+            localStorage.setItem('auth_user', JSON.stringify(session.user));
+          } catch {}
+        }
         set({
           user: session.user,
           accessToken: session.access_token || null,
@@ -100,6 +124,16 @@ export const useAuthStore = create<AuthState>()(
         try {
           const session = await authApi.signup(email, password);
           if (session.access_token && session.refresh_token) {
+            try {
+              localStorage.setItem('access_token', session.access_token);
+              localStorage.setItem('auth_token', session.access_token);
+            } catch {}
+            if (session.user) {
+              try {
+                localStorage.setItem('user', JSON.stringify(session.user));
+                localStorage.setItem('auth_user', JSON.stringify(session.user));
+              } catch {}
+            }
             set({
               user: session.user,
               accessToken: session.access_token,
@@ -143,6 +177,13 @@ export const useAuthStore = create<AuthState>()(
           }
         }
 
+        try {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user');
+          localStorage.removeItem('auth_user');
+        } catch {}
+
         set({
           user: null,
           accessToken: null,
@@ -161,6 +202,12 @@ export const useAuthStore = create<AuthState>()(
         
         try {
           const session = await authApi.refreshToken(refreshToken);
+          if (session.access_token) {
+            try {
+              localStorage.setItem('access_token', session.access_token);
+              localStorage.setItem('auth_token', session.access_token);
+            } catch {}
+          }
           set({
             user: session.user,
             accessToken: session.access_token,
@@ -169,6 +216,12 @@ export const useAuthStore = create<AuthState>()(
           });
         } catch (error) {
           console.error('Token refresh failed:', error);
+          try {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('auth_user');
+          } catch {}
           set({
             user: null,
             accessToken: null,

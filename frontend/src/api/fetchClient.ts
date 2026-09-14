@@ -43,6 +43,72 @@ export function buildApiUrl(endpoint: string): string {
   return `${getApiBaseUrl()}${cleanEndpoint}`;
 }
 
+/**
+ * Resolves the authentication token from multiple reliable sources:
+ * 1. LocalStorage flat keys ('access_token', 'auth_token')
+ * 2. Zustand persisted storage ('auth-storage' -> state.accessToken)
+ * 3. Active Supabase session (supabase.auth.getSession())
+ */
+export async function getAuthToken(): Promise<string | null> {
+  // 1. Check flat localStorage keys first
+  try {
+    const flatToken = localStorage.getItem('access_token') || localStorage.getItem('auth_token');
+    if (flatToken && flatToken.trim()) return flatToken.trim();
+  } catch {}
+
+  // 2. Check Zustand persisted auth-storage
+  try {
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      const parsed = JSON.parse(authStorage);
+      const token = parsed?.state?.accessToken;
+      if (token && typeof token === 'string' && token.trim()) {
+        try {
+          localStorage.setItem('access_token', token.trim());
+        } catch {}
+        return token.trim();
+      }
+    }
+  } catch {}
+
+  // 3. Check active Supabase session (primary for Google OAuth)
+  try {
+    const { supabase, isSupabaseConfigured } = await import('../lib/supabase');
+    if (isSupabaseConfigured && supabase) {
+      const { data } = await supabase.auth.getSession();
+      const sessionToken = data?.session?.access_token;
+      if (sessionToken && sessionToken.trim()) {
+        try {
+          localStorage.setItem('access_token', sessionToken.trim());
+        } catch {}
+        return sessionToken.trim();
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+export function getAuthUser(): { id?: string; email?: string } | null {
+  try {
+    const userJson = localStorage.getItem('user') || localStorage.getItem('auth_user');
+    if (userJson) {
+      const parsed = JSON.parse(userJson);
+      if (parsed?.id) return parsed;
+    }
+  } catch {}
+
+  try {
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      const parsed = JSON.parse(authStorage);
+      if (parsed?.state?.user?.id) return parsed.state.user;
+    }
+  } catch {}
+
+  return null;
+}
+
 async function client<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { body, params, headers, ...customConfig } = options;
 
@@ -79,23 +145,21 @@ async function client<T>(endpoint: string, options: FetchOptions = {}): Promise<
     }
   }
 
-  const token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
-  if (token && config.headers) {
-    (config.headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+  // Ensure Bearer token is attached if not already explicitly provided
+  const headerRecord = (config.headers as Record<string, string>);
+  const hasExistingAuth = headerRecord && (headerRecord['Authorization'] || headerRecord['authorization']);
+  if (!hasExistingAuth) {
+    const token = await getAuthToken();
+    if (token && headerRecord) {
+      headerRecord['Authorization'] = `Bearer ${token}`;
+    }
   }
 
   // Supply X-User-ID header for memory & multi-tenant APIs if available
-  const userJson = localStorage.getItem('user') || localStorage.getItem('auth_user');
-  let userId = 'usr-admin-1';
-  try {
-    if (userJson) {
-      const parsed = JSON.parse(userJson);
-      if (parsed?.id) userId = parsed.id;
-    }
-  } catch {}
-
-  if (config.headers && !(config.headers as Record<string, string>)['X-User-ID']) {
-    (config.headers as Record<string, string>)['X-User-ID'] = userId;
+  const authUser = getAuthUser();
+  const userId = authUser?.id || 'usr-admin-1';
+  if (headerRecord && !headerRecord['X-User-ID'] && !headerRecord['x-user-id']) {
+    headerRecord['X-User-ID'] = userId;
   }
 
   let response: Response;

@@ -152,7 +152,7 @@ class AuthService:
 
     def validate_token(self, token: str) -> dict:
         """
-        Validates the JWT token using the Supabase JWT secret.
+        Validates the JWT token using the Supabase JWT secret or Supabase Auth API.
         Returns the decoded payload if valid.
         """
         if token.startswith("dev-token-") and self._is_dev_bypass_active():
@@ -160,29 +160,46 @@ class AuthService:
             dev_id = token.replace("dev-token-", "") or str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
             return {"sub": dev_id, "email": dev_email}
 
-        if not settings.SUPABASE_JWT_SECRET:
-            if self._is_dev_bypass_active():
-                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
-                dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
-                return {"sub": dev_id, "email": dev_email}
+        # 1. Fast path: validate locally if SUPABASE_JWT_SECRET is configured
+        if settings.SUPABASE_JWT_SECRET:
+            try:
+                payload = jwt.decode(
+                    token, 
+                    settings.SUPABASE_JWT_SECRET, 
+                    algorithms=["HS256"], 
+                    options={"verify_aud": False}
+                )
+                return payload
+            except jwt.ExpiredSignatureError:
+                raise ValueError("Token has expired.")
+            except jwt.InvalidTokenError:
+                # Token might be signed by Supabase asymmetric keys; proceed to Supabase API fallback
+                pass
+
+        # 2. Reliable fallback: validate directly against Supabase Auth API
+        if self.supabase:
+            try:
+                res = self.supabase.auth.get_user(jwt=token)
+                if res and res.user:
+                    return {
+                        "sub": res.user.id,
+                        "email": res.user.email or "",
+                        "role": getattr(res.user, "role", "authenticated") or "authenticated",
+                        "user_metadata": getattr(res.user, "user_metadata", {}) or {},
+                        "app_metadata": getattr(res.user, "app_metadata", {}) or {},
+                    }
+            except Exception:
+                pass
+
+        if self._is_dev_bypass_active():
+            dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
+            dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
+            return {"sub": dev_id, "email": dev_email}
+
+        if not settings.SUPABASE_JWT_SECRET and not self.supabase:
             raise ValueError("SUPABASE_JWT_SECRET is not configured.")
-        
-        try:
-            payload = jwt.decode(
-                token, 
-                settings.SUPABASE_JWT_SECRET, 
-                algorithms=["HS256"], 
-                options={"verify_aud": False}
-            )
-            return payload
-        except jwt.ExpiredSignatureError:
-            raise ValueError("Token has expired.")
-        except jwt.InvalidTokenError:
-            if self._is_dev_bypass_active():
-                dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
-                dev_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, dev_email))
-                return {"sub": dev_id, "email": dev_email}
-            raise ValueError("Invalid token.")
+
+        raise ValueError("Invalid token.")
 
     def confirm_user_email(self, user_id: str) -> dict:
         """

@@ -1,4 +1,4 @@
-import { fetchClient, buildApiUrl } from './fetchClient';
+import { fetchClient, buildApiUrl, getAuthToken } from './fetchClient';
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ export const reportsApi = {
 
   async exportReport(id: string, format: ExportFormat): Promise<Blob> {
     const url = buildApiUrl(`/reports/${id}/export?format=${format}`);
-    const token = localStorage.getItem('access_token') || localStorage.getItem('auth_token');
+    const token = await getAuthToken();
     const res = await fetch(url, {
       method:  'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : {},

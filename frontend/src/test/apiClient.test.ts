@@ -264,8 +264,8 @@ describe('Centralized API Base URL and Endpoint Routing', () => {
     await expect(fetchClient.get('/test')).rejects.toThrow('Field required, Invalid URL');
   });
 
-  it('attaches X-User-ID and Authorization headers when available', async () => {
-    localStorage.setItem('auth_token', 'jwt-token-xyz');
+  it('attaches X-User-ID and Authorization headers from localStorage access_token', async () => {
+    localStorage.setItem('access_token', 'jwt-token-xyz');
     localStorage.setItem('user', JSON.stringify({ id: 'usr-custom-42' }));
 
     (globalThis.fetch as any).mockResolvedValueOnce({
@@ -281,6 +281,70 @@ describe('Centralized API Base URL and Endpoint Routing', () => {
         headers: expect.objectContaining({
           'Authorization': 'Bearer jwt-token-xyz',
           'X-User-ID': 'usr-custom-42',
+        }),
+      })
+    );
+  });
+
+  it('attaches Authorization Bearer token from Zustand auth-storage when flat key is missing', async () => {
+    localStorage.setItem(
+      'auth-storage',
+      JSON.stringify({
+        state: {
+          accessToken: 'zustand-oauth-jwt-token',
+          user: { id: 'usr-oauth-99', email: 'user@kaistudio.dev' },
+        },
+      })
+    );
+
+    (globalThis.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ ok: true }),
+    });
+
+    await fetchClient.get('/profile');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer zustand-oauth-jwt-token',
+          'X-User-ID': 'usr-oauth-99',
+        }),
+      })
+    );
+  });
+
+  it('does NOT attach Authorization header when unauthenticated (no token in storage)', async () => {
+    (globalThis.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ ok: true }),
+    });
+
+    await fetchClient.get('/public-endpoint');
+    const calledHeaders = (globalThis.fetch as any).mock.calls[0][1]?.headers;
+    expect(calledHeaders?.Authorization).toBeUndefined();
+    expect(calledHeaders?.authorization).toBeUndefined();
+  });
+
+  it('preserves caller-supplied Authorization header without overwriting', async () => {
+    localStorage.setItem('access_token', 'default-token');
+
+    (globalThis.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ ok: true }),
+    });
+
+    await fetchClient.get('/custom', {
+      headers: { Authorization: 'Bearer custom-explicit-token' },
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer custom-explicit-token',
         }),
       })
     );
