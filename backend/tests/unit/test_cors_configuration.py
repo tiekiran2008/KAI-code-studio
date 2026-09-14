@@ -113,3 +113,38 @@ def test_cors_preflight_regex_match_for_dynamic_preview():
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == preview_origin
     assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+@pytest.mark.parametrize("origin", [VERCEL_GIT_MASTER_URL, VERCEL_PROD_URL])
+def test_cors_preflight_with_x_user_id_header(origin):
+    """
+    Verifies that preflight OPTIONS requests including the frontend's three
+    custom headers — Authorization, X-User-ID, Content-Type — are accepted
+    with HTTP 200 and the correct CORS allow-headers echoed back.
+
+    This is the exact scenario that was failing in production: protected
+    endpoints (/workspaces, /teams, /repositories, /integrations/github/connect)
+    sent these three headers, but X-User-ID was not listed in allow_headers,
+    causing the browser to block the request.
+    """
+    client = TestClient(app)
+
+    response = client.options(
+        "/api/v1/workspaces",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,x-user-id,content-type",
+        },
+    )
+
+    assert response.status_code == 200, (
+        f"Preflight failed with {response.status_code} for origin={origin}"
+    )
+    assert response.headers.get("access-control-allow-origin") == origin
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+    allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
+    assert "authorization" in allowed_headers, "Authorization must be in Access-Control-Allow-Headers"
+    assert "x-user-id" in allowed_headers, "X-User-ID must be in Access-Control-Allow-Headers"
+    assert "content-type" in allowed_headers, "Content-Type must be in Access-Control-Allow-Headers"

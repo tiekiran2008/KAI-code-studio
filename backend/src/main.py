@@ -455,6 +455,7 @@ app.add_middleware(
         "If-Modified-Since",
         "X-Request-ID",
         "X-Process-Time-Ms",
+        "X-User-ID",  # custom header sent by the frontend API client
     ],
     expose_headers=["X-Request-ID", "X-Process-Time-Ms"],
 )
