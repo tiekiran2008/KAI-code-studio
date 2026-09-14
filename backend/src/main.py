@@ -310,6 +310,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings.ENVIRONMENT)
     logger.info("startup_begin", environment=settings.ENVIRONMENT, version="1.0.0")
 
+    # Safe Supabase config diagnostic (presence only, never values)
+    supabase_status = settings.get_supabase_config_status()
+    logger.info("startup_supabase_config", **supabase_status)
+    if not supabase_status["SUPABASE_URL"] or not supabase_status["SUPABASE_ANON_KEY"]:
+        logger.warning(
+            "startup_supabase_config_incomplete",
+            message="SUPABASE_URL and/or SUPABASE_ANON_KEY are not set. "
+                    "Token validation via Supabase API will fail with 403.",
+        )
+
     # ---- 2. PostgreSQL ----
     try:
         _init_postgres()

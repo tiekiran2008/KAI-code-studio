@@ -5,6 +5,7 @@ from typing import Optional
 from supabase import create_client, Client
 from supabase_auth.errors import AuthApiError
 from src.core.config import settings
+from src.core.logger import logger
 from src.domain.entities.user import User, UserSession
 
 class AuthService:
@@ -13,12 +14,27 @@ class AuthService:
         # For tests, we might mock this, but in production it will use real values
         supabase_url = settings.SUPABASE_URL
         supabase_key = settings.SUPABASE_KEY or settings.SUPABASE_ANON_KEY
+
+        # Safe startup diagnostic — logs presence of config, never values
+        config_status = settings.get_supabase_config_status()
+        logger.info(
+            "auth_service_init",
+            supabase_url_configured=config_status["SUPABASE_URL"],
+            anon_key_configured=config_status["SUPABASE_ANON_KEY"],
+            jwt_secret_configured=config_status["SUPABASE_JWT_SECRET"],
+        )
+
         if supabase_url and supabase_key:
             try:
                 self.supabase: Optional[Client] = create_client(supabase_url, supabase_key)
-            except Exception:
+            except Exception as exc:
+                logger.warning("auth_service_supabase_client_init_failed", error=str(exc))
                 self.supabase = None
         else:
+            logger.warning(
+                "auth_service_supabase_not_configured",
+                missing=[k for k, v in config_status.items() if not v],
+            )
             self.supabase = None
 
     def _is_dev_bypass_active(self) -> bool:
@@ -154,6 +170,13 @@ class AuthService:
         """
         Validates the JWT token using the Supabase JWT secret or Supabase Auth API.
         Returns the decoded payload if valid.
+
+        Validation order:
+        1. dev-token bypass (non-production only)
+        2. Local JWT decode with SUPABASE_JWT_SECRET (fast path, no network)
+        3. Supabase Auth API get_user (reliable fallback for Google OAuth tokens)
+           - Sends: apikey: <SUPABASE_ANON_KEY>, Authorization: Bearer <token>
+           - Returns 403 if SUPABASE_URL or SUPABASE_ANON_KEY is wrong/missing
         """
         if token.startswith("dev-token-") and self._is_dev_bypass_active():
             dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
@@ -164,9 +187,9 @@ class AuthService:
         if settings.SUPABASE_JWT_SECRET:
             try:
                 payload = jwt.decode(
-                    token, 
-                    settings.SUPABASE_JWT_SECRET, 
-                    algorithms=["HS256"], 
+                    token,
+                    settings.SUPABASE_JWT_SECRET,
+                    algorithms=["HS256"],
                     options={"verify_aud": False}
                 )
                 return payload
@@ -177,7 +200,11 @@ class AuthService:
                 pass
 
         # 2. Reliable fallback: validate directly against Supabase Auth API
+        #    The supabase-py client sends: apikey=<anon_key>, Authorization=Bearer <token>
+        #    A 403 response means: wrong SUPABASE_URL, wrong/missing SUPABASE_ANON_KEY,
+        #    or the token is invalid/expired.
         if self.supabase:
+            supabase_error: Optional[str] = None
             try:
                 res = self.supabase.auth.get_user(jwt=token)
                 if res and res.user:
@@ -188,8 +215,22 @@ class AuthService:
                         "user_metadata": getattr(res.user, "user_metadata", {}) or {},
                         "app_metadata": getattr(res.user, "app_metadata", {}) or {},
                     }
-            except Exception:
-                pass
+            except AuthApiError as exc:
+                # Surface the real Supabase error (e.g. "Invalid JWT" or 403 forbidden)
+                supabase_error = exc.message
+                logger.warning(
+                    "auth_supabase_get_user_failed",
+                    status=getattr(exc, "status", None),
+                    message=exc.message,
+                    supabase_url_configured=bool(settings.SUPABASE_URL),
+                    anon_key_configured=bool(settings.SUPABASE_ANON_KEY or settings.SUPABASE_KEY),
+                )
+            except Exception as exc:
+                supabase_error = str(exc)
+                logger.warning("auth_supabase_get_user_error", error=str(exc))
+
+            if supabase_error:
+                raise ValueError(f"Invalid token. Supabase auth error: {supabase_error}")
 
         if self._is_dev_bypass_active():
             dev_email = settings.DEV_AUTH_USER_EMAIL or "dev-user@example.com"
@@ -197,7 +238,10 @@ class AuthService:
             return {"sub": dev_id, "email": dev_email}
 
         if not settings.SUPABASE_JWT_SECRET and not self.supabase:
-            raise ValueError("SUPABASE_JWT_SECRET is not configured.")
+            raise ValueError(
+                "Supabase is not configured. Ensure SUPABASE_URL and SUPABASE_ANON_KEY "
+                "environment variables are set on the server."
+            )
 
         raise ValueError("Invalid token.")
 

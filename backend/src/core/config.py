@@ -36,8 +36,22 @@ class Settings(BaseSettings):
             or self.POSTGRES_URL
         )
         if effective_db:
+            # Normalize postgres:// -> postgresql:// (psycopg2 requires the latter)
             if effective_db.startswith("postgres://"):
                 effective_db = effective_db.replace("postgres://", "postgresql://", 1)
+            # Strip Supabase pooler query params that psycopg2 rejects as invalid DSN options.
+            # e.g. ?pgbouncer=true is added by the Supabase connection pooler URL but
+            # psycopg2 raises: ProgrammingError: invalid connection option "pgbouncer"
+            if "?" in effective_db:
+                base_url, query = effective_db.split("?", 1)
+                # Keep only psycopg2-safe params; drop pgbouncer and other Supabase-only params
+                _SUPABASE_ONLY_PARAMS = {"pgbouncer", "sslmode"}  # sslmode handled via connect_args
+                safe_params = []
+                for param in query.split("&"):
+                    key = param.split("=")[0].strip()
+                    if key and key not in _SUPABASE_ONLY_PARAMS:
+                        safe_params.append(param)
+                effective_db = base_url + ("?" + "&".join(safe_params) if safe_params else "")
             self.POSTGRES_URL = effective_db
 
         # Always ensure key production Vercel origins are included in CORS_ORIGINS
@@ -54,7 +68,7 @@ class Settings(BaseSettings):
         frontend_url = os.getenv("FRONTEND_URL") or self.FRONTEND_URL
         if frontend_url:
             for url_part in frontend_url.split(","):
-                cleaned = url_part.strip().strip("'\"").rstrip("/")
+                cleaned = url_part.strip().strip("'\"" ).rstrip("/")
                 if cleaned and cleaned != "*" and cleaned not in self.CORS_ORIGINS:
                     self.CORS_ORIGINS.append(cleaned)
 
@@ -62,10 +76,22 @@ class Settings(BaseSettings):
 
     def get_redis_kwargs(self) -> Dict[str, Any]:
         """Returns redis client kwargs, injecting ssl settings for Upstash/rediss TLS connections."""
-        kwargs: Dict[str, Any] = {"decode_responses": False}
+        kwargs: Dict[str, Any] = {"decode_responses": False, "socket_connect_timeout": 5}
         if self.REDIS_URL.startswith("rediss://"):
+            # Upstash Redis requires TLS; ssl_cert_reqs=None skips certificate verification
+            # which is required for Upstash free-tier (self-signed or intermediate CA).
             kwargs["ssl_cert_reqs"] = None
         return kwargs
+
+    def get_supabase_config_status(self) -> Dict[str, bool]:
+        """Safe startup diagnostic: reports ONLY whether required Supabase env vars
+        are configured (non-empty). Never logs or returns their values."""
+        return {
+            "SUPABASE_URL": bool(self.SUPABASE_URL),
+            "SUPABASE_ANON_KEY": bool(self.SUPABASE_ANON_KEY or self.SUPABASE_KEY),
+            "SUPABASE_JWT_SECRET": bool(self.SUPABASE_JWT_SECRET),
+            "SUPABASE_SERVICE_ROLE_KEY": bool(self.SUPABASE_SERVICE_ROLE_KEY),
+        }
 
     # ---- CORS ----
     CORS_ORIGIN_REGEX: str = r"^https://kai-code-studio.*\.vercel\.app$"

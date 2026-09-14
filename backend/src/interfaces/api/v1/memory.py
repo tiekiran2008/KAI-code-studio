@@ -28,7 +28,7 @@ dependency from the existing auth middleware.
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
@@ -68,18 +68,42 @@ router = APIRouter()
 # Header-based user isolation (placeholder for JWT middleware)
 # ---------------------------------------------------------------------------
 
-def _require_user_id(x_user_id: Optional[str] = Header(None, alias="X-User-ID")) -> str:
-    """Enforce user isolation via X-User-ID header.
+def _require_user_id(
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    # Optional JWT-based fallback: resolves user from Bearer token when header absent
+    credentials: Optional[Any] = Depends(__import__("src.interfaces.api.dependencies", fromlist=["security"]).security),
+) -> str:
+    """Resolve user identity for memory operations.
 
-    Returns 401 (not 422) when the header is absent or blank, so clients
-    see a consistent authentication error rather than a validation error.
+    Priority:
+    1. X-User-ID header (explicit, for backward compat and direct API calls)
+    2. JWT Bearer token sub claim (frontend requests after X-User-ID was removed
+       from fetchClient to fix Cloudflare WAF preflight blocking)
+
+    Returns 401 when neither source provides a valid user ID.
     """
-    if not x_user_id or not x_user_id.strip():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-User-ID header is required for memory operations.",
-        )
-    return x_user_id.strip()
+    # Priority 1: explicit header
+    if x_user_id and x_user_id.strip():
+        return x_user_id.strip()
+
+    # Priority 2: resolve from JWT Bearer token
+    if credentials is not None:
+        try:
+            from src.application.services.auth_service import AuthService
+            auth_service = AuthService()
+            token = credentials.credentials
+            payload = auth_service.validate_token(token)
+            user_id = payload.get("sub")
+            if user_id:
+                return user_id
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required for memory operations. "
+               "Provide a valid Bearer token or X-User-ID header.",
+    )
 
 
 # ---------------------------------------------------------------------------
