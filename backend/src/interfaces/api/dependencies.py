@@ -23,9 +23,9 @@ from src.core.logger import logger
 
 @lru_cache(maxsize=1)
 def _get_embedding_service():
-    """Cached SentenceTransformer embedding service (expensive to load)."""
+    """Cached lightweight ONNX embedding service."""
     from src.infrastructure.embeddings.sentence_transformer_service import SentenceTransformerService
-    logger.info("embedding_service_init", message="Loading SentenceTransformer modelâ€¦")
+    logger.info("embedding_service_init", message="Initializing embedding service (ONNX)...")
     return SentenceTransformerService()
 
 

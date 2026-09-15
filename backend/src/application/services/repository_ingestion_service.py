@@ -283,60 +283,95 @@ class RepositoryIngestionService:
                 files_discovered=total_files,
             )
 
-            # Stage 3: Parse and generate chunks
-            all_chunks = []
-            for idx, file_path in enumerate(discovered_files):
-                try:
-                    rel_str = str(file_path.relative_to(repo_path)).replace("\\", "/")
-                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+            # Stage 3 & 4: Streamlined incremental Chunking, Embedding & Upsert
+            # Avoids keeping all chunks across all files in RAM simultaneously.
+            BATCH_SIZE = 32
+            total_indexed = 0
+            emb_time_total = 0.0
 
-                    file_chunks = self.code_chunker.chunk_file(
+            if hasattr(idx_mgr, "prepare_repository_indexing") and hasattr(idx_mgr, "index_chunk_batch"):
+                # Clean existing repository chunks in Qdrant before incremental insertion
+                idx_mgr.prepare_repository_indexing(repo_id)
+
+                chunk_buffer: List[Any] = []
+                for idx, file_path in enumerate(discovered_files):
+                    try:
+                        rel_str = str(file_path.relative_to(repo_path)).replace("\\", "/")
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+
+                        file_chunks = self.code_chunker.chunk_file(
+                            repo_id=repo_id,
+                            file_path=rel_str,
+                            content=content,
+                            commit_hash=commit_hash,
+                        )
+                        chunk_buffer.extend(file_chunks)
+
+                        # Flush to Qdrant once batch size threshold is reached
+                        while len(chunk_buffer) >= BATCH_SIZE:
+                            current_batch = chunk_buffer[:BATCH_SIZE]
+                            chunk_buffer = chunk_buffer[BATCH_SIZE:]
+                            emb_time = idx_mgr.index_chunk_batch(current_batch)
+                            emb_time_total += emb_time
+                            total_indexed += len(current_batch)
+
+                    except Exception as e:
+                        logger.warning("Failed to chunk file", file=str(file_path), error=str(e))
+
+                    if idx % 10 == 0 or idx == total_files - 1:
+                        stream_progress = 40.0 + (55.0 * ((idx + 1) / max(total_files, 1)))
+                        self._update_progress(
+                            repo_id,
+                            status="indexing",
+                            stage="indexing",
+                            progress=stream_progress,
+                            files_processed=idx + 1,
+                            chunks_created=total_indexed + len(chunk_buffer),
+                        )
+
+                # Flush any remaining chunks in buffer
+                if chunk_buffer:
+                    emb_time = idx_mgr.index_chunk_batch(chunk_buffer)
+                    emb_time_total += emb_time
+                    total_indexed += len(chunk_buffer)
+                    chunk_buffer.clear()
+
+                # Record metrics if method available
+                if hasattr(idx_mgr, "record_indexing_metrics"):
+                    total_time_sec = time.perf_counter() - start_time
+                    idx_mgr.record_indexing_metrics(
                         repo_id=repo_id,
-                        file_path=rel_str,
-                        content=content,
                         commit_hash=commit_hash,
-                    )
-                    all_chunks.extend(file_chunks)
-                except Exception as e:
-                    logger.warning("Failed to chunk file", file=str(file_path), error=str(e))
-
-                if idx % 20 == 0 or idx == total_files - 1:
-                    chunking_progress = 40.0 + (30.0 * ((idx + 1) / max(total_files, 1)))
-                    self._update_progress(
-                        repo_id,
-                        status="indexing",
-                        stage="chunking",
-                        progress=chunking_progress,
-                        files_processed=idx + 1,
-                        chunks_created=len(all_chunks),
+                        total_time_sec=total_time_sec,
+                        chunks_count=total_indexed,
+                        embedding_latency_sec=emb_time_total,
                     )
 
-            # Stage 4: Embed & Upsert into Qdrant
-            self._update_progress(
-                repo_id,
-                status="indexing",
-                stage="embedding",
-                progress=70.0,
-                chunks_created=len(all_chunks),
-            )
+            else:
+                # Fallback for custom mocks or external index managers
+                all_chunks = []
+                for idx, file_path in enumerate(discovered_files):
+                    try:
+                        rel_str = str(file_path.relative_to(repo_path)).replace("\\", "/")
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
 
-            def on_progress(done_chunks: int, total_c: int):
-                pct = 70.0 + (25.0 * (done_chunks / max(total_c, 1)))
-                self._update_progress(
-                    repo_id,
-                    status="indexing",
-                    stage="indexing",
-                    progress=pct,
-                    chunks_created=total_c,
+                        file_chunks = self.code_chunker.chunk_file(
+                            repo_id=repo_id,
+                            file_path=rel_str,
+                            content=content,
+                            commit_hash=commit_hash,
+                        )
+                        all_chunks.extend(file_chunks)
+                    except Exception as e:
+                        logger.warning("Failed to chunk file", file=str(file_path), error=str(e))
+
+                total_indexed = idx_mgr.index_full_repository(
+                    repo_id=repo_id,
+                    commit_hash=commit_hash,
+                    chunks=all_chunks,
                 )
-
-            total_indexed = idx_mgr.index_full_repository(
-                repo_id=repo_id,
-                commit_hash=commit_hash,
-                chunks=all_chunks,
-                progress_callback=on_progress,
-            )
 
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             # Stage 5: Mark Completed in PostgreSQL (valid only if vectors exist)

@@ -1,0 +1,40 @@
+/**
+ * Uses the current Supabase session when configured.
+ * Legacy token storage is used only without Supabase.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  try {
+    const { supabase, isSupabaseConfigured } =
+      await import('../lib/supabase');
+
+    if (isSupabaseConfigured) {
+      if (!supabase) return null;
+
+      const { data, error } = await supabase.auth.getSession();
+      if (error) return null;
+
+      return data.session?.access_token?.trim() || null;
+    }
+  } catch {
+    return null;
+  }
+
+  // Legacy authentication for setups without Supabase.
+  try {
+    const flatToken =
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('auth_token');
+
+    if (flatToken?.trim()) return flatToken.trim();
+
+    const stored = localStorage.getItem('auth-storage');
+    if (stored) {
+      const token = JSON.parse(stored)?.state?.accessToken;
+      if (typeof token === 'string' && token.trim()) {
+        return token.trim();
+      }
+    }
+  } catch { }
+
+  return null;
+}
