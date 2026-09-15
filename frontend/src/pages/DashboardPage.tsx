@@ -8,14 +8,30 @@ import { RecentConversations } from '../components/dashboard/RecentConversations
 import { RecentReviews } from '../components/dashboard/RecentReviews';
 import { QuickActions } from '../components/dashboard/QuickActions';
 import { RecentActivityTimeline } from '../components/dashboard/RecentActivityTimeline';
-import { LoadingScreen } from '../components/common/LoadingScreen';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { repositories, sessions, analytics, memories, reviews, isLoadingReviews, isLoading } = useDashboardData();
 
   if (isLoading) {
-    return <LoadingScreen isLoading={true} message="Loading dashboard data..." fullScreen={false} />;
+    return (
+      <div role="status" className="rounded-2xl border border-slate-700 bg-slate-900 p-6 space-y-4">
+        <h1 className="text-lg font-semibold text-white">Loading dashboard data</h1>
+        <p className="text-sm text-slate-300">
+          The server may take a moment to wake up. You can open Settings while dashboard requests finish.
+        </p>
+        <div className="flex gap-3">
+          <button type="button" onClick={() => navigate('/settings')}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-white">
+            Open Settings / Connect GitHub
+          </button>
+          <button type="button" onClick={() => window.location.reload()}
+            className="rounded-lg border border-slate-600 px-4 py-2 text-slate-200">
+            Reload page
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -32,7 +48,7 @@ export const DashboardPage: React.FC = () => {
               Welcome back, Lead Architect
             </h1>
             <p className="text-slate-400 text-sm leading-relaxed">
-              Your autonomous software engineering platform is operating normally. All specialized LangGraph agents and developer environment tools are ready for analysis, bug detection, and reasoning.
+              Browse your repositories, review code, and manage your AI workspace.
             </p>
           </div>
 
