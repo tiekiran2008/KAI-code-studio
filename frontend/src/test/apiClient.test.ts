@@ -264,7 +264,7 @@ describe('Centralized API Base URL and Endpoint Routing', () => {
     await expect(fetchClient.get('/test')).rejects.toThrow('Field required, Invalid URL');
   });
 
-  it('attaches X-User-ID and Authorization headers from localStorage access_token', async () => {
+  it('attaches Authorization header from localStorage access_token without injecting X-User-ID', async () => {
     localStorage.setItem('access_token', 'jwt-token-xyz');
     localStorage.setItem('user', JSON.stringify({ id: 'usr-custom-42' }));
 
@@ -280,10 +280,11 @@ describe('Centralized API Base URL and Endpoint Routing', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           'Authorization': 'Bearer jwt-token-xyz',
-          'X-User-ID': 'usr-custom-42',
         }),
       })
     );
+    const calledHeaders = (globalThis.fetch as any).mock.calls[0][1]?.headers;
+    expect(calledHeaders['X-User-ID']).toBeUndefined();
   });
 
   it('attaches Authorization Bearer token from Zustand auth-storage when flat key is missing', async () => {
@@ -309,10 +310,11 @@ describe('Centralized API Base URL and Endpoint Routing', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           'Authorization': 'Bearer zustand-oauth-jwt-token',
-          'X-User-ID': 'usr-oauth-99',
         }),
       })
     );
+    const calledHeaders = (globalThis.fetch as any).mock.calls[0][1]?.headers;
+    expect(calledHeaders['X-User-ID']).toBeUndefined();
   });
 
   it('does NOT attach Authorization header when unauthenticated (no token in storage)', async () => {

@@ -40,28 +40,25 @@ export const OAuthCallbackPage: React.FC = () => {
         if (isSupabaseConfigured && supabase) {
           setStatusText('Finalizing session…');
 
-          const code = searchParams.get('code');
-          let session = null;
+          const { data: initialData, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) throw sessionError;
 
-          if (code && typeof supabase.auth.exchangeCodeForSession === 'function') {
-            try {
-              const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-              if (exchangeError) {
-                const { data: sessionData } = await supabase.auth.getSession();
-                session = sessionData?.session || null;
-                if (!session) throw exchangeError;
-              } else {
-                session = exchangeData?.session || null;
-              }
-            } catch {
-              const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-              if (sessionError) throw sessionError;
-              session = sessionData?.session || null;
-            }
-          } else {
-            const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-            if (sessionError) throw sessionError;
-            session = sessionData?.session || null;
+          let session = initialData?.session || null;
+
+          if (!session) {
+            // Await Supabase client URL processing / exchange listener
+            session = await new Promise((resolve) => {
+              const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+                if (newSession && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED')) {
+                  subscription.unsubscribe();
+                  resolve(newSession);
+                }
+              });
+              setTimeout(() => {
+                subscription.unsubscribe();
+                resolve(null);
+              }, 3000);
+            });
           }
 
           if (session && session.user) {

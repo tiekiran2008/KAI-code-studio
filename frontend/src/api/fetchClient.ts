@@ -215,10 +215,8 @@ async function performRequest<T>(
     }
   }
 
-  const user = getAuthUser();
-  if (user?.id && headerRecord && !headerRecord['X-User-ID'] && !headerRecord['x-user-id']) {
-    headerRecord['X-User-ID'] = user.id;
-  }
+  // NOTE: Do not automatically inject X-User-ID.
+  // Cloudflare WAF (in front of Render) blocks preflight OPTIONS requests that contain non-whitelisted custom headers.
 
   let response: Response;
 

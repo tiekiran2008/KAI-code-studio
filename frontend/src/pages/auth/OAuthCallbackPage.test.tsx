@@ -78,4 +78,17 @@ describe('OAuthCallbackPage Component', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
     });
   });
+
+  it('sets user session and redirects to / on successful OAuth callback', async () => {
+    render(
+      <MemoryRouter initialEntries={['/auth/callback?code=mock-auth-code']}>
+        <OAuthCallbackPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockSetOAuthSession).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+    });
+  });
 });
