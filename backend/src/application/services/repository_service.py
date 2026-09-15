@@ -91,8 +91,66 @@ def _build_tree_from_paths(repo_id: str, paths: List[str]) -> List[FileNode]:
     return dict_to_nodes(root)
 
 
+def _reconstruct_file_from_chunks(chunks: List[Dict[str, Any]]) -> str:
+    """
+    Reconstruct file text deterministically from ordered semantic and structural chunks.
+    Eliminates overlap/duplication by aligning chunks onto their 1-indexed source line numbers.
+    """
+    if not chunks:
+        return ""
+
+    if len(chunks) == 1:
+        return chunks[0].get("content", "")
+
+    # If any chunk is the complete file root chunk, return its content
+    for c in chunks:
+        if c.get("symbol_name") == "file_root":
+            return c.get("content", "")
+
+    # Sort chunks: primary by start_line ascending, secondary by window length descending
+    sorted_chunks = sorted(
+        chunks,
+        key=lambda c: (
+            c.get("start_line") if c.get("start_line") is not None else 999999,
+            -((c.get("end_line") or 0) - (c.get("start_line") or 0)),
+        ),
+    )
+
+    line_map: Dict[int, str] = {}
+    has_valid_line_numbers = False
+
+    for c in sorted_chunks:
+        content = c.get("content", "")
+        start_line = c.get("start_line")
+        end_line = c.get("end_line")
+        lines = content.splitlines()
+
+        if start_line is not None and start_line > 0:
+            has_valid_line_numbers = True
+            for i, line in enumerate(lines):
+                line_num = start_line + i
+                if end_line is not None and line_num > end_line:
+                    break
+                line_map[line_num] = line
+
+    if has_valid_line_numbers and line_map:
+        max_line = max(line_map.keys())
+        reconstructed = [line_map.get(l, "") for l in range(1, max_line + 1)]
+        return "\n".join(reconstructed)
+
+    # Fallback if line numbers were missing: join unique chunk contents in order
+    seen_texts = set()
+    ordered_parts = []
+    for c in sorted_chunks:
+        text = c.get("content", "").strip()
+        if text and text not in seen_texts:
+            seen_texts.add(text)
+            ordered_parts.append(text)
+    return "\n\n".join(ordered_parts)
+
 
 class RepositoryService:
+
     def __init__(
         self,
         repo_repository: RepositoryRepository,
@@ -357,48 +415,92 @@ class RepositoryService:
 
 
     def get_file_content(self, user_id: str, repo_id: str, relative_path: str) -> FileContentResponse:
-        """Fetch safe, sandboxed file content for a file in the repository."""
+        """Fetch safe, sandboxed file content for a file in the repository.
+
+        Primary: read directly from the cloned repository on disk (fast, exact).
+        Fallback: reconstruct from Qdrant chunk payloads when the disk directory
+                  is absent (e.g. after an ephemeral Render/serverless restart).
+        """
         db_repo = self.repo_repository.get_by_id(repo_id)
         if not db_repo:
             raise ValueError("Repository not found")
         if db_repo.user_id != user_id:
             raise PermissionError("Unauthorized access to repository")
 
-        repo_dir = self._get_repo_dir(repo_id, db_repo)
-        if not repo_dir.exists() or not repo_dir.is_dir():
-            raise FileNotFoundError("Repository directory not found on disk")
+        # 1. Validate relative path format and check for traversal
+        if "\x00" in str(relative_path):
+            raise ValueError("Null bytes are not allowed in file paths")
 
-        # Strip leading slashes from requested path
-        clean_rel = relative_path.lstrip("/\\")
+        clean_rel = str(relative_path).replace("\\", "/").strip().lstrip("/")
         if not clean_rel:
             raise ValueError("File path cannot be empty")
 
-        safe_path = PathSandboxService.validate_path(repo_dir, clean_rel, must_be_file=True)
-        if not safe_path.exists() or not safe_path.is_file():
-            raise FileNotFoundError(f"File not found: {clean_rel}")
+        path_parts = Path(clean_rel).parts
+        if ".." in path_parts or clean_rel.startswith(("/", "\\", "..")) or "/../" in clean_rel:
+            raise ValueError(f"Directory traversal '..' is forbidden: '{clean_rel}'")
 
-        size = safe_path.stat().st_size
-        if size > 2 * 1024 * 1024:
-            raise ValueError(f"File size ({size} bytes) exceeds maximum viewing limit of 2MB")
-
-        is_valid, reason = FileFilter.is_valid_file(clean_rel, size)
+        is_valid, reason = FileFilter.is_valid_file(clean_rel, 0)
         if not is_valid and reason and "Sensitive" in reason:
             raise PermissionError(f"Access to sensitive file is forbidden: {reason}")
 
-        try:
-            content = safe_path.read_text(encoding="utf-8")
-            is_binary = False
-        except UnicodeDecodeError:
-            content = "[Binary file cannot be displayed as text]"
-            is_binary = True
+        # 2. Primary path: Read from local clone on disk if present
+        repo_dir = self._get_repo_dir(repo_id, db_repo)
+        if repo_dir.exists() and repo_dir.is_dir():
+            try:
+                safe_path = PathSandboxService.validate_path(repo_dir, clean_rel, must_be_file=True)
+                if safe_path.exists() and safe_path.is_file():
+                    size = safe_path.stat().st_size
+                    if size > 2 * 1024 * 1024:
+                        raise ValueError(f"File size ({size} bytes) exceeds maximum viewing limit of 2MB")
 
-        lang = FileFilter.detect_language(clean_rel)
-        return FileContentResponse(
-            path=clean_rel.replace("\\", "/"),
-            name=safe_path.name,
-            content=content,
-            size=size,
-            language=lang,
-            is_binary=is_binary,
-        )
+                    is_valid_file, file_reason = FileFilter.is_valid_file(clean_rel, size)
+                    if not is_valid_file and file_reason and "Sensitive" in file_reason:
+                        raise PermissionError(f"Access to sensitive file is forbidden: {file_reason}")
+
+                    try:
+                        content = safe_path.read_text(encoding="utf-8")
+                        is_binary = False
+                    except UnicodeDecodeError:
+                        content = "[Binary file cannot be displayed as text]"
+                        is_binary = True
+
+                    lang = FileFilter.detect_language(clean_rel)
+                    return FileContentResponse(
+                        path=clean_rel,
+                        name=safe_path.name,
+                        content=content,
+                        size=size,
+                        language=lang,
+                        is_binary=is_binary,
+                    )
+            except (PermissionError, ValueError):
+                raise
+            except Exception:
+                # If disk resolution failed, proceed to vector DB fallback
+                pass
+
+        # 3. Fallback path: Reconstruct from Qdrant vector index chunks
+        if self.vector_db is not None:
+            chunks = self.vector_db.get_file_chunks("codebase_chunks", repo_id, clean_rel)
+            if chunks:
+                content = _reconstruct_file_from_chunks(chunks)
+                filename = Path(clean_rel).name
+                lang = chunks[0].get("language") or FileFilter.detect_language(clean_rel)
+                encoded_bytes = content.encode("utf-8")
+                size = len(encoded_bytes)
+
+                if size > 2 * 1024 * 1024:
+                    raise ValueError(f"File size ({size} bytes) exceeds maximum viewing limit of 2MB")
+
+                return FileContentResponse(
+                    path=clean_rel,
+                    name=filename,
+                    content=content,
+                    size=size,
+                    language=lang,
+                    is_binary=False,
+                )
+
+        raise FileNotFoundError(f"File not found: {clean_rel}")
+
 

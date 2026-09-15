@@ -153,3 +153,46 @@ class QdrantAdapter(IVectorDB):
             pass
         return file_paths
 
+    def get_file_chunks(self, collection_name: str, repo_id: str, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Return all chunk payloads stored for a specific file in the repository.
+        Uses Qdrant scroll to retrieve points without loading high-dimensional vectors.
+        """
+        chunks: List[Dict[str, Any]] = []
+        clean_path = file_path.replace("\\", "/").lstrip("/")
+        try:
+            scroll_filter = rest.Filter(
+                must=[
+                    rest.FieldCondition(
+                        key="repo_id",
+                        match=rest.MatchValue(value=repo_id),
+                    ),
+                    rest.FieldCondition(
+                        key="file_path",
+                        match=rest.MatchValue(value=clean_path),
+                    ),
+                ]
+            )
+            offset = None
+            while True:
+                results, next_offset = self.client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=scroll_filter,
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in results:
+                    if point.payload:
+                        payload_data = point.payload.copy()
+                        payload_data["id"] = str(point.id)
+                        chunks.append(payload_data)
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception:
+            pass
+        return chunks
+
+

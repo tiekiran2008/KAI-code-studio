@@ -209,3 +209,171 @@ def test_repository_service_tree_fallback_to_vector_db(tmp_path):
     finally:
         settings.WORKSPACE_ROOT = old_root
 
+
+def test_get_file_content_fallback_to_vector_db_when_disk_missing(tmp_path):
+    """When the local disk directory is missing, reconstruct file from Qdrant chunks."""
+    mock_db_repo = MagicMock()
+    mock_db_repo.id = "repo-qdrant-content"
+    mock_db_repo.user_id = "user-1"
+    mock_db_repo.url = "https://github.com/test/repo-qdrant"
+
+    mock_repo_repo = MagicMock()
+    mock_repo_repo.get_by_id.return_value = mock_db_repo
+
+    # Simulate multi-chunk file with overlapping line windows (e.g. lines 1-4, lines 3-6)
+    mock_vector_db = MagicMock()
+    mock_vector_db.get_file_chunks.return_value = [
+        {
+            "id": "chunk-1",
+            "repo_id": "repo-qdrant-content",
+            "file_path": "main.py",
+            "content": "line1\nline2\nline3\nline4",
+            "language": "python",
+            "start_line": 1,
+            "end_line": 4,
+        },
+        {
+            "id": "chunk-2",
+            "repo_id": "repo-qdrant-content",
+            "file_path": "main.py",
+            "content": "line3\nline4\nline5\nline6",
+            "language": "python",
+            "start_line": 3,
+            "end_line": 6,
+        },
+    ]
+
+    from src.core.config import settings
+    old_root = settings.WORKSPACE_ROOT
+    settings.WORKSPACE_ROOT = str(tmp_path / "ephemeral_empty")
+
+    try:
+        svc = RepositoryService(
+            repo_repository=mock_repo_repo,
+            vector_db=mock_vector_db,
+        )
+
+        res = svc.get_file_content("user-1", "repo-qdrant-content", "main.py")
+
+        mock_vector_db.get_file_chunks.assert_called_once_with("codebase_chunks", "repo-qdrant-content", "main.py")
+        assert res.path == "main.py"
+        assert res.name == "main.py"
+        assert res.language == "python"
+        assert res.is_binary is False
+        # Verify deduplication / exact line reconstruction: lines 1 to 6 without duplicates
+        expected_content = "line1\nline2\nline3\nline4\nline5\nline6"
+        assert res.content == expected_content
+
+    finally:
+        settings.WORKSPACE_ROOT = old_root
+
+
+def test_get_file_content_nested_path_fallback(tmp_path):
+    """Test fallback with nested directory path."""
+    mock_db_repo = MagicMock()
+    mock_db_repo.id = "repo-nested"
+    mock_db_repo.user_id = "user-1"
+    mock_db_repo.url = "https://github.com/test/repo-nested"
+
+    mock_repo_repo = MagicMock()
+    mock_repo_repo.get_by_id.return_value = mock_db_repo
+
+    mock_vector_db = MagicMock()
+    mock_vector_db.get_file_chunks.return_value = [
+        {
+            "id": "chunk-nested-1",
+            "repo_id": "repo-nested",
+            "file_path": "src/utils/math_helper.py",
+            "content": "def add(a, b):\n    return a + b\n",
+            "language": "python",
+            "start_line": 1,
+            "end_line": 2,
+        }
+    ]
+
+    from src.core.config import settings
+    old_root = settings.WORKSPACE_ROOT
+    settings.WORKSPACE_ROOT = str(tmp_path / "ephemeral_empty")
+
+    try:
+        svc = RepositoryService(
+            repo_repository=mock_repo_repo,
+            vector_db=mock_vector_db,
+        )
+
+        res = svc.get_file_content("user-1", "repo-nested", "src/utils/math_helper.py")
+        assert res.path == "src/utils/math_helper.py"
+        assert res.name == "math_helper.py"
+        assert "def add(a, b):" in res.content
+
+    finally:
+        settings.WORKSPACE_ROOT = old_root
+
+
+def test_get_file_content_nonexistent_file_raises_404(tmp_path):
+    """When file does not exist on disk AND not in Qdrant, raise FileNotFoundError."""
+    mock_db_repo = MagicMock()
+    mock_db_repo.id = "repo-empty"
+    mock_db_repo.user_id = "user-1"
+    mock_db_repo.url = "https://github.com/test/repo-empty"
+
+    mock_repo_repo = MagicMock()
+    mock_repo_repo.get_by_id.return_value = mock_db_repo
+
+    mock_vector_db = MagicMock()
+    mock_vector_db.get_file_chunks.return_value = []
+
+    from src.core.config import settings
+    old_root = settings.WORKSPACE_ROOT
+    settings.WORKSPACE_ROOT = str(tmp_path / "ephemeral_empty")
+
+    try:
+        svc = RepositoryService(
+            repo_repository=mock_repo_repo,
+            vector_db=mock_vector_db,
+        )
+
+        with pytest.raises(FileNotFoundError):
+            svc.get_file_content("user-1", "repo-empty", "nonexistent.py")
+
+    finally:
+        settings.WORKSPACE_ROOT = old_root
+
+
+def test_get_file_content_path_traversal_and_sensitive_rejected(tmp_path):
+    """Path traversal and sensitive file access must be rejected immediately."""
+    mock_db_repo = MagicMock()
+    mock_db_repo.id = "repo-secure"
+    mock_db_repo.user_id = "user-1"
+    mock_db_repo.url = "https://github.com/test/repo-secure"
+
+    mock_repo_repo = MagicMock()
+    mock_repo_repo.get_by_id.return_value = mock_db_repo
+
+    mock_vector_db = MagicMock()
+
+    from src.core.config import settings
+    old_root = settings.WORKSPACE_ROOT
+    settings.WORKSPACE_ROOT = str(tmp_path / "ephemeral_empty")
+
+    try:
+        svc = RepositoryService(
+            repo_repository=mock_repo_repo,
+            vector_db=mock_vector_db,
+        )
+
+        # 1. Traversal check
+        with pytest.raises(ValueError):
+            svc.get_file_content("user-1", "repo-secure", "../../etc/passwd")
+
+        with pytest.raises(ValueError):
+            svc.get_file_content("user-1", "repo-secure", "..\\..\\secret.txt")
+
+        # 2. Sensitive file check
+        with pytest.raises(PermissionError):
+            svc.get_file_content("user-1", "repo-secure", ".env")
+
+    finally:
+        settings.WORKSPACE_ROOT = old_root
+
+

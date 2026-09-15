@@ -83,6 +83,26 @@ class MockVectorDB(IVectorDB):
         chunks = self.stored_chunks.get(collection_name, [])
         return {c.file_path for c in chunks if c.repo_id == repo_id}
 
+    def get_file_chunks(self, collection_name: str, repo_id: str, file_path: str):
+        chunks = self.stored_chunks.get(collection_name, [])
+        return [
+            {
+                "id": c.id,
+                "repo_id": c.repo_id,
+                "file_path": c.file_path,
+                "content": c.content,
+                "language": c.language,
+                "commit_hash": c.commit_hash,
+                "symbol_name": c.symbol_name,
+                "symbol_type": c.symbol_type,
+                "start_line": c.start_line,
+                "end_line": c.end_line,
+            }
+            for c in chunks
+            if c.repo_id == repo_id and c.file_path == file_path
+        ]
+
+
 
 
 def test_repository_ingestion_end_to_end():

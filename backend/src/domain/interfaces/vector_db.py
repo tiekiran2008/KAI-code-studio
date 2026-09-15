@@ -24,3 +24,9 @@ class IVectorDB(ABC):
         """Return the set of distinct file_path values indexed for the given repo_id."""
         pass
 
+    @abstractmethod
+    def get_file_chunks(self, collection_name: str, repo_id: str, file_path: str) -> List[Dict[str, Any]]:
+        """Return all chunk payloads stored for a specific file in the repository."""
+        pass
+
+
