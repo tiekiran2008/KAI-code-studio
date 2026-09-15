@@ -156,21 +156,19 @@ class QdrantAdapter(IVectorDB):
     def get_file_chunks(self, collection_name: str, repo_id: str, file_path: str) -> List[Dict[str, Any]]:
         """
         Return all chunk payloads stored for a specific file in the repository.
-        Uses Qdrant scroll to retrieve points without loading high-dimensional vectors.
+        Uses Qdrant scroll with repo_id filter (identical to get_indexed_files)
+        and filters by file_path in memory to avoid unindexed Qdrant field 400 Bad Request errors.
         """
         chunks: List[Dict[str, Any]] = []
-        clean_path = file_path.replace("\\", "/").lstrip("/")
+        target_path = file_path.replace("\\", "/").strip().lstrip("/")
+
         try:
             scroll_filter = rest.Filter(
                 must=[
                     rest.FieldCondition(
                         key="repo_id",
                         match=rest.MatchValue(value=repo_id),
-                    ),
-                    rest.FieldCondition(
-                        key="file_path",
-                        match=rest.MatchValue(value=clean_path),
-                    ),
+                    )
                 ]
             )
             offset = None
@@ -178,21 +176,44 @@ class QdrantAdapter(IVectorDB):
                 results, next_offset = self.client.scroll(
                     collection_name=collection_name,
                     scroll_filter=scroll_filter,
-                    limit=100,
+                    limit=250,
                     offset=offset,
                     with_payload=True,
                     with_vectors=False,
                 )
                 for point in results:
-                    if point.payload:
+                    if not point.payload:
+                        continue
+
+                    p_path = point.payload.get("file_path") or point.payload.get("path") or ""
+                    clean_p_path = str(p_path).replace("\\", "/").strip().lstrip("/")
+
+                    if clean_p_path == target_path:
                         payload_data = point.payload.copy()
                         payload_data["id"] = str(point.id)
+                        # Normalize payload field aliases
+                        if "content" not in payload_data and "text" in payload_data:
+                            payload_data["content"] = payload_data["text"]
+                        if "file_path" not in payload_data and "path" in payload_data:
+                            payload_data["file_path"] = payload_data["path"]
                         chunks.append(payload_data)
+
                 if next_offset is None:
                     break
                 offset = next_offset
-        except Exception:
-            pass
+
+        except Exception as exc:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "Qdrant scroll error in get_file_chunks for collection=%s, repo_id=%s: %s",
+                collection_name,
+                repo_id,
+                str(exc),
+            )
+            raise RuntimeError(f"Vector database error during chunk retrieval: {str(exc)}") from exc
+
         return chunks
+
 
 

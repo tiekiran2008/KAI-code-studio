@@ -377,3 +377,80 @@ def test_get_file_content_path_traversal_and_sensitive_rejected(tmp_path):
         settings.WORKSPACE_ROOT = old_root
 
 
+def test_qdrant_adapter_get_file_chunks_real_schema_and_filter():
+    """Verify QdrantAdapter.get_file_chunks uses repo_id scroll filter and in-memory matching on real schema."""
+    from src.infrastructure.vector_db.qdrant_adapter import QdrantAdapter
+
+    mock_client = MagicMock()
+    adapter = QdrantAdapter(url="http://mock-qdrant:6333")
+    adapter.client = mock_client
+
+    # Create mock scored points with real stored Qdrant payload schema
+    point_readme = MagicMock()
+    point_readme.id = "chunk-uuid-1"
+    point_readme.payload = {
+        "repo_id": "dd2026d2-6746-4b3e-ad7c-48156609f455",
+        "file_path": "README.md",
+        "content": "# AI Skill Analyzer\nAnalyzes skills efficiently.",
+        "language": "markdown",
+        "commit_hash": "HEAD",
+        "symbol_name": "file_root",
+        "symbol_type": "module",
+        "start_line": 1,
+        "end_line": 2,
+    }
+
+    point_gitignore = MagicMock()
+    point_gitignore.id = "chunk-uuid-2"
+    point_gitignore.payload = {
+        "repo_id": "dd2026d2-6746-4b3e-ad7c-48156609f455",
+        "file_path": ".gitignore",
+        "content": "node_modules/\n__pycache__/\n",
+        "language": "ignore",
+        "commit_hash": "HEAD",
+        "symbol_name": None,
+        "symbol_type": None,
+        "start_line": 1,
+        "end_line": 2,
+    }
+
+    mock_client.scroll.return_value = ([point_readme, point_gitignore], None)
+
+    # 1. Retrieve README.md
+    chunks = adapter.get_file_chunks("codebase_chunks", "dd2026d2-6746-4b3e-ad7c-48156609f455", "README.md")
+    assert len(chunks) == 1
+    assert chunks[0]["file_path"] == "README.md"
+    assert chunks[0]["content"] == "# AI Skill Analyzer\nAnalyzes skills efficiently."
+    assert chunks[0]["start_line"] == 1
+    assert chunks[0]["end_line"] == 2
+
+    # Verify filter uses ONLY repo_id (no unindexed field errors)
+    scroll_args = mock_client.scroll.call_args[1]
+    scroll_filter = scroll_args["scroll_filter"]
+    assert len(scroll_filter.must) == 1
+    assert scroll_filter.must[0].key == "repo_id"
+    assert scroll_filter.must[0].match.value == "dd2026d2-6746-4b3e-ad7c-48156609f455"
+
+    # 2. Retrieve .gitignore
+    chunks_git = adapter.get_file_chunks("codebase_chunks", "dd2026d2-6746-4b3e-ad7c-48156609f455", ".gitignore")
+    assert len(chunks_git) == 1
+    assert chunks_git[0]["file_path"] == ".gitignore"
+    assert "node_modules/" in chunks_git[0]["content"]
+
+
+def test_qdrant_adapter_get_file_chunks_error_propagates():
+    """Verify that a Qdrant communication/scroll error is raised as RuntimeError and not masked as 404."""
+    from src.infrastructure.vector_db.qdrant_adapter import QdrantAdapter
+
+    mock_client = MagicMock()
+    mock_client.scroll.side_effect = Exception("400 Bad Request: Collection not found")
+
+    adapter = QdrantAdapter(url="http://mock-qdrant:6333")
+    adapter.client = mock_client
+
+    with pytest.raises(RuntimeError) as excinfo:
+        adapter.get_file_chunks("codebase_chunks", "repo-123", "main.py")
+    assert "Vector database error during chunk retrieval" in str(excinfo.value)
+
+
+

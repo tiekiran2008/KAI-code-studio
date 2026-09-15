@@ -100,12 +100,14 @@ def _reconstruct_file_from_chunks(chunks: List[Dict[str, Any]]) -> str:
         return ""
 
     if len(chunks) == 1:
-        return chunks[0].get("content", "")
+        return chunks[0].get("content") or chunks[0].get("text") or ""
 
     # If any chunk is the complete file root chunk, return its content
     for c in chunks:
         if c.get("symbol_name") == "file_root":
-            return c.get("content", "")
+            content = c.get("content") or c.get("text")
+            if content:
+                return content
 
     # Sort chunks: primary by start_line ascending, secondary by window length descending
     sorted_chunks = sorted(
@@ -120,7 +122,7 @@ def _reconstruct_file_from_chunks(chunks: List[Dict[str, Any]]) -> str:
     has_valid_line_numbers = False
 
     for c in sorted_chunks:
-        content = c.get("content", "")
+        content = c.get("content") or c.get("text") or ""
         start_line = c.get("start_line")
         end_line = c.get("end_line")
         lines = content.splitlines()
@@ -142,11 +144,12 @@ def _reconstruct_file_from_chunks(chunks: List[Dict[str, Any]]) -> str:
     seen_texts = set()
     ordered_parts = []
     for c in sorted_chunks:
-        text = c.get("content", "").strip()
+        text = (c.get("content") or c.get("text") or "").strip()
         if text and text not in seen_texts:
             seen_texts.add(text)
             ordered_parts.append(text)
     return "\n\n".join(ordered_parts)
+
 
 
 class RepositoryService:
