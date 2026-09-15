@@ -39,18 +39,40 @@ export const OAuthCallbackPage: React.FC = () => {
       try {
         if (isSupabaseConfigured && supabase) {
           setStatusText('Finalizing session…');
-          const { data, error: sessionError } = await supabase.auth.getSession();
-          if (sessionError) throw sessionError;
 
-          if (data.session && data.session.user) {
+          const code = searchParams.get('code');
+          let session = null;
+
+          if (code && typeof supabase.auth.exchangeCodeForSession === 'function') {
+            try {
+              const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+              if (exchangeError) {
+                const { data: sessionData } = await supabase.auth.getSession();
+                session = sessionData?.session || null;
+                if (!session) throw exchangeError;
+              } else {
+                session = exchangeData?.session || null;
+              }
+            } catch {
+              const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+              if (sessionError) throw sessionError;
+              session = sessionData?.session || null;
+            }
+          } else {
+            const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+            if (sessionError) throw sessionError;
+            session = sessionData?.session || null;
+          }
+
+          if (session && session.user) {
             const userSession = {
-              access_token: data.session.access_token,
-              refresh_token: data.session.refresh_token,
-              expires_in: data.session.expires_in,
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              expires_in: session.expires_in,
               user: {
-                id: data.session.user.id,
-                email: data.session.user.email || '',
-                created_at: data.session.user.created_at || new Date().toISOString(),
+                id: session.user.id,
+                email: session.user.email || '',
+                created_at: session.user.created_at || new Date().toISOString(),
               },
             };
 

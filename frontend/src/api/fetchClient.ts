@@ -64,21 +64,15 @@ export async function getAuthToken(): Promise<string | null> {
     const { supabase, isSupabaseConfigured } =
       await import('../lib/supabase');
 
-    if (isSupabaseConfigured) {
-      if (!supabase) return null;
-
+    if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.auth.getSession();
-
-      if (error) return null;
-
-      return data.session?.access_token?.trim() || null;
+      if (!error && data.session?.access_token?.trim()) {
+        return data.session.access_token.trim();
+      }
     }
-  } catch {
-    // Do not fall back to cached tokens if Supabase initialization fails.
-    return null;
-  }
+  } catch { }
 
-  // Legacy authentication for setups without Supabase.
+  // Fallback to stored tokens (email/password login, OAuth session storage, or mock dev)
   try {
     const flatToken =
       localStorage.getItem('access_token') ||
@@ -221,8 +215,10 @@ async function performRequest<T>(
     }
   }
 
-  // Do not automatically add X-User-ID.
-  // Callers that require it must pass it explicitly through options.headers.
+  const user = getAuthUser();
+  if (user?.id && headerRecord && !headerRecord['X-User-ID'] && !headerRecord['x-user-id']) {
+    headerRecord['X-User-ID'] = user.id;
+  }
 
   let response: Response;
 
