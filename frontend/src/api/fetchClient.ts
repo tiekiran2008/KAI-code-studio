@@ -12,6 +12,7 @@ export class ApiError extends Error {
 
 interface FetchOptions extends Omit<RequestInit, 'body'> {
   body?: any;
+  timeoutMs?: number;
   params?: Record<string, string | number | boolean | undefined>;
 }
 
@@ -125,7 +126,41 @@ export function getAuthUser(): { id?: string; email?: string } | null {
   return null;
 }
 
-async function client<T>(
+
+/** Bound session lookup, network I/O and body parsing so loading always settles. */
+async function client<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
+  const { timeoutMs = options.method === 'GET' ? 90000 : 600000, signal, ...requestOptions } = options;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const interrupted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      reject(signal?.reason || new DOMException('Request cancelled', 'AbortError'));
+      controller.abort(signal?.reason);
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(() => {
+      reject(new ApiError(408, 'The request timed out. Please retry. If it continues, sign out and sign in again.'));
+      controller.abort();
+    }, timeoutMs);
+  });
+  try {
+    if (signal?.aborted) return await interrupted;
+    return await Promise.race([
+      performRequest<T>(endpoint, { ...requestOptions, signal: controller.signal }),
+      interrupted,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+async function performRequest<T>(
   endpoint: string,
   options: FetchOptions = {},
 ): Promise<T> {
