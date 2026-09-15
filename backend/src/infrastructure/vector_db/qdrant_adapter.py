@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from qdrant_client.http import models as rest
 from src.infrastructure.vector_db.qdrant_client_factory import get_shared_qdrant_client
 from src.domain.interfaces.vector_db import IVectorDB
@@ -114,3 +114,42 @@ class QdrantAdapter(IVectorDB):
             res["id"] = str(scored_point.id)
             results.append(res)
         return results
+
+    def get_indexed_files(self, collection_name: str, repo_id: str) -> Set[str]:
+        """
+        Return the set of distinct file_path values indexed for the given repo_id.
+        Uses Qdrant scroll to page through all matching points without loading vectors.
+        This is used as a fallback to reconstruct the file tree when the local clone
+        directory no longer exists (e.g. after an ephemeral Render restart).
+        """
+        file_paths: Set[str] = set()
+        try:
+            scroll_filter = rest.Filter(
+                must=[
+                    rest.FieldCondition(
+                        key="repo_id",
+                        match=rest.MatchValue(value=repo_id),
+                    )
+                ]
+            )
+            offset = None
+            while True:
+                results, next_offset = self.client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=scroll_filter,
+                    limit=250,
+                    offset=offset,
+                    with_payload=["file_path"],
+                    with_vectors=False,
+                )
+                for point in results:
+                    if point.payload and point.payload.get("file_path"):
+                        file_paths.add(point.payload["file_path"])
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception:
+            # Do not crash caller if Qdrant is temporarily unavailable
+            pass
+        return file_paths
+

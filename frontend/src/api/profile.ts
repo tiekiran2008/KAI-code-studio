@@ -27,5 +27,10 @@ export const profileApi = {
 
   async updateProfile(profileData: Partial<UserProfile>): Promise<UserProfile> {
     return fetchClient.put<UserProfile>('/profile', profileData);
+  },
+
+  async removeAvatar(): Promise<UserProfile> {
+    return fetchClient.delete<UserProfile>('/profile/avatar');
   }
 };
+

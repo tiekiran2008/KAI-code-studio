@@ -7,10 +7,12 @@ interface ProfileState {
   avatarTimestamp: number;
   isLoading: boolean;
   isSaving: boolean;
+  isRemovingAvatar: boolean;
   error: string | null;
   
   fetchProfile: () => Promise<void>;
   updateProfile: (profileData: Partial<UserProfile>) => Promise<UserProfile>;
+  removeAvatar: () => Promise<UserProfile>;
   setProfile: (profile: UserProfile | null) => void;
   clearError: () => void;
 }
@@ -22,6 +24,7 @@ export const useProfileStore = create<ProfileState>()(
       avatarTimestamp: Date.now(),
       isLoading: false,
       isSaving: false,
+      isRemovingAvatar: false,
       error: null,
 
       fetchProfile: async () => {
@@ -46,6 +49,24 @@ export const useProfileStore = create<ProfileState>()(
         }
       },
 
+      removeAvatar: async () => {
+        set({ isRemovingAvatar: true, error: null });
+        try {
+          // Attempt DELETE /profile/avatar, falling back to PUT /profile with { avatar: null }
+          let updatedProfile: UserProfile;
+          try {
+            updatedProfile = await profileApi.removeAvatar();
+          } catch {
+            updatedProfile = await profileApi.updateProfile({ avatar: null });
+          }
+          set({ profile: updatedProfile, isRemovingAvatar: false, avatarTimestamp: Date.now() });
+          return updatedProfile;
+        } catch (error: any) {
+          set({ error: error.message || 'Failed to remove profile photo', isRemovingAvatar: false });
+          throw error;
+        }
+      },
+
       setProfile: (profile) => set({ profile, avatarTimestamp: Date.now() }),
 
       clearError: () => set({ error: null })
@@ -56,4 +77,5 @@ export const useProfileStore = create<ProfileState>()(
     }
   )
 );
+
 

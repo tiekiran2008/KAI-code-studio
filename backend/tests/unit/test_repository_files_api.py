@@ -154,3 +154,58 @@ def test_repository_service_real_tree_and_traversal_protection(tmp_path):
 
     finally:
         settings.WORKSPACE_ROOT = old_root
+
+
+def test_repository_service_tree_fallback_to_vector_db(tmp_path):
+    mock_db_repo = MagicMock()
+    mock_db_repo.id = "repo-fallback"
+    mock_db_repo.user_id = "user-1"
+    mock_db_repo.url = "https://github.com/test/repo-fallback"
+
+    mock_repo_repo = MagicMock()
+    mock_repo_repo.get_by_id.return_value = mock_db_repo
+
+    mock_vector_db = MagicMock()
+    mock_vector_db.get_indexed_files.return_value = {
+        "src/app.py",
+        "src/utils/helper.py",
+        "README.md",
+    }
+
+    from src.core.config import settings
+    old_root = settings.WORKSPACE_ROOT
+    # Point workspace root to an empty tmp_path so repo dir does not exist
+    settings.WORKSPACE_ROOT = str(tmp_path / "empty_workspace")
+
+    try:
+        svc = RepositoryService(
+            repo_repository=mock_repo_repo,
+            vector_db=mock_vector_db,
+        )
+
+        tree = svc.get_file_tree("user-1", "repo-fallback")
+        mock_vector_db.get_indexed_files.assert_called_once_with("codebase_chunks", "repo-fallback")
+
+        assert len(tree) == 2
+        # Directories sorted first or alphabetic
+        # root has "src" (dir) and "README.md" (file)
+        names = [n.name for n in tree]
+        assert "src" in names
+        assert "README.md" in names
+
+        src_node = next(n for n in tree if n.name == "src")
+        assert src_node.type == "directory"
+        assert len(src_node.children) == 2
+        src_child_names = [c.name for c in src_node.children]
+        assert "app.py" in src_child_names
+        assert "utils" in src_child_names
+
+        utils_node = next(c for c in src_node.children if c.name == "utils")
+        assert utils_node.type == "directory"
+        assert len(utils_node.children) == 1
+        assert utils_node.children[0].name == "helper.py"
+        assert utils_node.children[0].path == "src/utils/helper.py"
+
+    finally:
+        settings.WORKSPACE_ROOT = old_root
+

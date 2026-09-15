@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 import time
 
 from src.core.config import settings
@@ -23,6 +23,72 @@ from src.infrastructure.analysis.stack_detector import StackDetector
 from src.infrastructure.filesystem.path_sandbox import PathSandboxService
 from src.infrastructure.filesystem.file_filter import FileFilter
 from src.domain.interfaces.vector_db import IVectorDB
+
+
+def _build_tree_from_paths(repo_id: str, paths: List[str]) -> List[FileNode]:
+    """
+    Convert a flat sorted list of POSIX relative file paths into a nested FileNode tree.
+    Used as a Qdrant-based fallback when the local git clone directory is absent.
+    """
+    # Build a nested dict: { "segment": { "__files__": [...], "subdir": {...} } }
+    root: Dict = {}
+
+    for path in paths:
+        parts = path.replace("\\", "/").lstrip("/").split("/")
+        node = root
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        file_name = parts[-1]
+        node.setdefault("__files__", []).append((file_name, path))
+
+    def dict_to_nodes(d: Dict, depth: int = 0) -> List[FileNode]:
+        nodes: List[FileNode] = []
+        # Directories first (sorted), then files
+        dir_keys = sorted(k for k in d if k != "__files__")
+        for key in dir_keys:
+            sub = d[key]
+            # Derive rel_path by collecting the first file path under this dir
+            # We reconstruct relative path from the nested file paths
+            child_nodes = dict_to_nodes(sub, depth + 1)
+            # Extract rel_path from first child to compute dir path
+            first_child_path = _first_path(child_nodes)
+            if first_child_path:
+                rel_path = "/".join(first_child_path.split("/")[: depth + 1])
+            else:
+                rel_path = key
+            nodes.append(
+                FileNode(
+                    id=f"dir-{repo_id}-{rel_path}",
+                    name=key,
+                    path=rel_path,
+                    type="directory",
+                    children=child_nodes,
+                )
+            )
+        for file_name, full_rel_path in sorted(d.get("__files__", [])):
+            lang = FileFilter.detect_language(full_rel_path)
+            nodes.append(
+                FileNode(
+                    id=f"file-{repo_id}-{full_rel_path}",
+                    name=file_name,
+                    path=full_rel_path,
+                    type="file",
+                    language=lang,
+                )
+            )
+        return nodes
+
+    def _first_path(nodes: List[FileNode]) -> Optional[str]:
+        for n in nodes:
+            if n.type == "file":
+                return n.path
+            if n.children:
+                p = _first_path(n.children)
+                if p:
+                    return p
+        return None
+
+    return dict_to_nodes(root)
 
 
 
@@ -210,7 +276,12 @@ class RepositoryService:
         return (base_dir / "repos" / repo_id).resolve()
 
     def get_file_tree(self, user_id: str, repo_id: str) -> List[FileNode]:
-        """Fetch sanitized hierarchical file tree for repository."""
+        """Fetch sanitized hierarchical file tree for repository.
+
+        Primary: walk the cloned repository on disk (fast, full metadata).
+        Fallback: reconstruct from Qdrant chunk metadata when the disk directory
+                  is absent (e.g. after an ephemeral Render/serverless restart).
+        """
         db_repo = self.repo_repository.get_by_id(repo_id)
         if not db_repo:
             raise ValueError("Repository not found")
@@ -218,56 +289,72 @@ class RepositoryService:
             raise PermissionError("Unauthorized access to repository")
 
         repo_dir = self._get_repo_dir(repo_id, db_repo)
-        if not repo_dir.exists() or not repo_dir.is_dir():
-            return []
+        if repo_dir.exists() and repo_dir.is_dir():
+            # ── Primary path: scan the local clone ──────────────────────────
+            def build_tree(current_dir: Path, rel_base: str = "") -> List[FileNode]:
+                nodes: List[FileNode] = []
+                try:
+                    entries = sorted(
+                        os.scandir(current_dir),
+                        key=lambda e: (not e.is_dir(), e.name.lower()),
+                    )
+                except Exception:
+                    return nodes
 
-        def build_tree(current_dir: Path, rel_base: str = "") -> List[FileNode]:
-            nodes: List[FileNode] = []
-            try:
-                entries = sorted(
-                    os.scandir(current_dir),
-                    key=lambda e: (not e.is_dir(), e.name.lower()),
-                )
-            except Exception:
+                for entry in entries:
+                    rel_path = f"{rel_base}/{entry.name}".lstrip("/")
+                    if entry.is_dir(follow_symlinks=False):
+                        if FileFilter.should_ignore_dir(entry.name):
+                            continue
+                        children = build_tree(Path(entry.path), rel_path)
+                        nodes.append(
+                            FileNode(
+                                id=f"dir-{repo_id}-{rel_path}",
+                                name=entry.name,
+                                path=rel_path,
+                                type="directory",
+                                children=children,
+                            )
+                        )
+                    elif entry.is_file(follow_symlinks=False):
+                        try:
+                            size = entry.stat().st_size
+                        except Exception:
+                            size = 0
+                        is_valid, _ = FileFilter.is_valid_file(rel_path, size)
+                        if not is_valid:
+                            continue
+                        lang = FileFilter.detect_language(rel_path)
+                        nodes.append(
+                            FileNode(
+                                id=f"file-{repo_id}-{rel_path}",
+                                name=entry.name,
+                                path=rel_path,
+                                type="file",
+                                size=size,
+                                language=lang,
+                            )
+                        )
                 return nodes
 
-            for entry in entries:
-                rel_path = f"{rel_base}/{entry.name}".lstrip("/")
-                if entry.is_dir(follow_symlinks=False):
-                    if FileFilter.should_ignore_dir(entry.name):
-                        continue
-                    children = build_tree(Path(entry.path), rel_path)
-                    nodes.append(
-                        FileNode(
-                            id=f"dir-{repo_id}-{rel_path}",
-                            name=entry.name,
-                            path=rel_path,
-                            type="directory",
-                            children=children,
-                        )
-                    )
-                elif entry.is_file(follow_symlinks=False):
-                    try:
-                        size = entry.stat().st_size
-                    except Exception:
-                        size = 0
-                    is_valid, _ = FileFilter.is_valid_file(rel_path, size)
-                    if not is_valid:
-                        continue
-                    lang = FileFilter.detect_language(rel_path)
-                    nodes.append(
-                        FileNode(
-                            id=f"file-{repo_id}-{rel_path}",
-                            name=entry.name,
-                            path=rel_path,
-                            type="file",
-                            size=size,
-                            language=lang,
-                        )
-                    )
-            return nodes
+            return build_tree(repo_dir)
 
-        return build_tree(repo_dir)
+        # ── Fallback path: reconstruct tree from Qdrant index ────────────────
+        # Used when the ephemeral local clone no longer exists after a restart.
+        if self.vector_db is None:
+            return []
+
+        try:
+            file_paths = self.vector_db.get_indexed_files("codebase_chunks", repo_id)
+        except Exception:
+            return []
+
+        if not file_paths:
+            return []
+
+        return _build_tree_from_paths(repo_id, sorted(file_paths))
+
+
 
     def get_file_content(self, user_id: str, repo_id: str, relative_path: str) -> FileContentResponse:
         """Fetch safe, sandboxed file content for a file in the repository."""

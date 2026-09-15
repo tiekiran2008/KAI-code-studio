@@ -47,3 +47,15 @@ def update_user_profile(
         raise HTTPException(status_code=401, detail="Invalid user token")
     
     return profile_service.update_profile(user_id, profile_data)
+
+@router.delete("/avatar", response_model=UserProfile)
+def remove_user_avatar(
+    current_user: dict = Depends(get_current_user),
+    profile_service: UserProfileService = Depends(get_profile_service)
+):
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user token")
+    
+    return profile_service.remove_avatar(user_id)
+

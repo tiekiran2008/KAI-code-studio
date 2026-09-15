@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 from src.domain.models.chunk import SemanticChunk
 
 class IVectorDB(ABC):
@@ -17,5 +17,10 @@ class IVectorDB(ABC):
 
     @abstractmethod
     def search(self, collection_name: str, query_embedding: List[float], filter_metadata: Dict[str, Any] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_indexed_files(self, collection_name: str, repo_id: str) -> Set[str]:
+        """Return the set of distinct file_path values indexed for the given repo_id."""
         pass
 

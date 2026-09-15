@@ -32,25 +32,41 @@ class UserProfileService:
             )
             self.session.add(db_profile)
 
-        # Update fields
-        if profile_data.name is not None:
+        # Update fields only if present in model_fields_set to allow explicit nulls (e.g. avatar removal)
+        if "name" in profile_data.model_fields_set:
             db_profile.name = profile_data.name
-        if profile_data.avatar is not None:
+        if "avatar" in profile_data.model_fields_set:
             db_profile.avatar = profile_data.avatar
-        if profile_data.bio is not None:
+        if "bio" in profile_data.model_fields_set:
             db_profile.bio = profile_data.bio
-        if profile_data.timezone is not None:
+        if "timezone" in profile_data.model_fields_set and profile_data.timezone is not None:
             db_profile.timezone = profile_data.timezone
-        if profile_data.theme_preference is not None:
+        if "theme_preference" in profile_data.model_fields_set and profile_data.theme_preference is not None:
             db_profile.theme_preference = profile_data.theme_preference
-        if profile_data.preferred_llm_provider is not None:
+        if "preferred_llm_provider" in profile_data.model_fields_set and profile_data.preferred_llm_provider is not None:
             db_profile.preferred_llm_provider = profile_data.preferred_llm_provider
-        if profile_data.default_ai_model is not None:
+        if "default_ai_model" in profile_data.model_fields_set and profile_data.default_ai_model is not None:
             db_profile.default_ai_model = profile_data.default_ai_model
-        if profile_data.notification_preferences is not None:
+        if "notification_preferences" in profile_data.model_fields_set and profile_data.notification_preferences is not None:
             db_profile.notification_preferences = profile_data.notification_preferences.model_dump()
 
         self.session.commit()
         self.session.refresh(db_profile)
         
         return UserProfile.model_validate(db_profile)
+
+    def remove_avatar(self, user_id: str) -> UserProfile:
+        db_profile = self.session.query(DBUserProfile).filter(DBUserProfile.user_id == user_id).first()
+        if not db_profile:
+            db_profile = DBUserProfile(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                notification_preferences=NotificationPreferences().model_dump()
+            )
+            self.session.add(db_profile)
+        
+        db_profile.avatar = None
+        self.session.commit()
+        self.session.refresh(db_profile)
+        return UserProfile.model_validate(db_profile)
+

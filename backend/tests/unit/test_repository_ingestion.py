@@ -79,6 +79,11 @@ class MockVectorDB(IVectorDB):
             })
         return results
 
+    def get_indexed_files(self, collection_name: str, repo_id: str):
+        chunks = self.stored_chunks.get(collection_name, [])
+        return {c.file_path for c in chunks if c.repo_id == repo_id}
+
+
 
 def test_repository_ingestion_end_to_end():
     # 1. Create a temporary local repository folder
