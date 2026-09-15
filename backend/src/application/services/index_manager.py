@@ -1,11 +1,14 @@
 import time
 import uuid
 from typing import List, Callable, Optional
+import structlog
 from sqlalchemy.orm import Session
 from src.domain.interfaces.embedding import IEmbeddingService
 from src.domain.interfaces.vector_db import IVectorDB
 from src.domain.models.chunk import SemanticChunk
 from src.infrastructure.persistence.metrics_models import DBIndexingMetrics
+
+logger = structlog.get_logger(__name__)
 
 class IndexManager:
     def __init__(self, embedding_service: IEmbeddingService, vector_db: IVectorDB, db_session: Optional[Session] = None):
@@ -19,6 +22,7 @@ class IndexManager:
         """Cleans previous repository vectors from Qdrant and ensures collection exists."""
         self.vector_db.ensure_collection(self.collection_name, self.embedding_service.dimension)
         self.vector_db.delete_by_repo(self.collection_name, repo_id)
+        logger.info("qdrant_repository_cleanup", repo_id=repo_id, collection=self.collection_name)
 
     def index_chunk_batch(
         self,
@@ -35,6 +39,7 @@ class IndexManager:
         embeddings = self.embedding_service.generate_embeddings(texts)
         emb_latency = time.time() - t0
         self.vector_db.upsert_chunks(self.collection_name, chunks, embeddings)
+        logger.debug("qdrant_batch_indexed", chunk_count=len(chunks), emb_latency_sec=round(emb_latency, 4))
         return emb_latency
 
     def record_indexing_metrics(

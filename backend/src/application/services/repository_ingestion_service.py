@@ -275,6 +275,7 @@ class RepositoryIngestionService:
                         discovered_files.append(full_file_path)
 
             total_files = len(discovered_files)
+            logger.info("repository_files_discovered", repo_id=repo_id, total_files=total_files)
             self._update_progress(
                 repo_id,
                 status="indexing",

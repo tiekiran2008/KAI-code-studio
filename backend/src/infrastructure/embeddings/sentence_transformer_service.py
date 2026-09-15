@@ -98,6 +98,7 @@ class SentenceTransformerService(IEmbeddingService):
                 from huggingface_hub import hf_hub_download
 
                 # Download or retrieve cached ONNX weights & tokenizer
+                logger.info("onnx_model_download_start", model=self.model_name)
                 try:
                     model_path = hf_hub_download(self.model_name, "onnx/model.onnx")
                 except Exception:
